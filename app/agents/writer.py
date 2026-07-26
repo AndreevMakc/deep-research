@@ -10,6 +10,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.agents.verifier import VERIFIER_AGENT
 from app.budget import consume_run_budget, estimate_tokens
+from app.config import get_settings
 from app.db.models import (
     ClaimReviewStatus,
     VerificationVerdict,
@@ -23,7 +24,10 @@ from app.db.repositories import (
 from app.db.session import SessionFactory
 from app.models import create_writer_model
 from app.prompts import load_prompt
-from app.resilience import retry_external_call
+from app.resilience import (
+    ExternalOutputValidationError,
+    retry_external_call,
+)
 from app.schemas.writer import (
     CitedStatement,
     FinalResearchReport,
@@ -176,9 +180,16 @@ def generate_writer_draft(
         )
 
     model = create_writer_model()
+    method = (
+        "function_calling"
+        if get_settings().llm_provider.strip().lower()
+        == "google"
+        else "json_schema"
+    )
     structured_model = model.with_structured_output(
         WriterDraft,
-        method="json_schema",
+        method=method,
+        strict=True,
     )
     messages = [
         SystemMessage(
@@ -196,18 +207,27 @@ def generate_writer_draft(
         ),
     ]
 
-    result = retry_external_call(
+    def invoke_and_validate() -> WriterDraft:
+        result = structured_model.invoke(messages)
+
+        if not isinstance(result, WriterDraft):
+            raise TypeError(
+                "Writer returned an unexpected result type"
+            )
+
+        try:
+            validate_writer_draft(result, packet)
+        except ValueError as error:
+            raise ExternalOutputValidationError(
+                str(error)
+            ) from error
+
+        return result
+
+    return retry_external_call(
         "writer_llm",
-        structured_model.invoke,
-        messages,
+        invoke_and_validate,
     )
-
-    if not isinstance(result, WriterDraft):
-        raise TypeError(
-            "Writer returned an unexpected result type"
-        )
-
-    return result
 
 
 def _statement_numbers(
@@ -249,7 +269,16 @@ def validate_writer_draft(
             *packet.accepted_claims,
             *packet.rejected_claims,
         ]
-    ) | set(NUMBER_PATTERN.findall(packet.question))
+    ) | set(
+        NUMBER_PATTERN.findall(
+            " ".join(
+                [
+                    packet.question,
+                    *packet.known_unanswered_questions,
+                ]
+            )
+        )
+    )
     main_statements = [
         *draft.short_answer,
         *[

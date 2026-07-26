@@ -120,9 +120,15 @@ class FakeModel:
         self.schema = None
         self.method = None
 
-    def with_structured_output(self, schema, method):
+    def with_structured_output(
+        self,
+        schema,
+        method,
+        strict,
+    ):
         self.schema = schema
         self.method = method
+        self.strict = strict
         return self.structured
 
 

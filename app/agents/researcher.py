@@ -20,7 +20,10 @@ from app.db.session import SessionFactory
 from app.error_handling import classify_expected_error
 from app.models import create_worker_model
 from app.prompts import load_prompt
-from app.resilience import retry_external_call
+from app.resilience import (
+    ExternalOutputValidationError,
+    retry_external_call,
+)
 from app.schemas.research_result import (
     ResearchTaskResult,
     SearchSource,
@@ -295,7 +298,7 @@ def _validate_evidence(
     )
 
     if unknown_result_urls:
-        raise ValueError(
+        raise ExternalOutputValidationError(
             "Researcher cited URLs absent from source packet: "
             + ", ".join(sorted(unknown_result_urls))
         )
@@ -306,13 +309,13 @@ def _validate_evidence(
         )
 
         if source is None:
-            raise ValueError(
+            raise ExternalOutputValidationError(
                 "Researcher cited URL absent from source packet: "
                 f"{finding.source_url}"
             )
 
         if finding.source_url not in result_urls:
-            raise ValueError(
+            raise ExternalOutputValidationError(
                 "Finding source URL is absent from "
                 "top-level source_urls"
             )
@@ -320,7 +323,7 @@ def _validate_evidence(
         quote = finding.evidence_quote.strip()
 
         if quote not in source.document.content:
-            raise ValueError(
+            raise ExternalOutputValidationError(
                 "Evidence quote is absent from stored "
                 f"source text: {finding.source_url}"
             )
@@ -383,6 +386,7 @@ def generate_research_result(
     structured_model = model.with_structured_output(
         ResearchTaskResult,
         method="json_schema",
+        strict=True,
     )
 
     messages = [
@@ -413,18 +417,21 @@ def generate_research_result(
             ),
         )
 
+    def invoke_and_validate() -> ResearchTaskResult:
+        result = structured_model.invoke(messages)
+
+        if not isinstance(result, ResearchTaskResult):
+            raise TypeError(
+                "Researcher returned an unexpected result type"
+            )
+
+        _validate_evidence(result, sources)
+        return result
+
     result = retry_external_call(
         "researcher_llm",
-        structured_model.invoke,
-        messages,
+        invoke_and_validate,
     )
-
-    if not isinstance(result, ResearchTaskResult):
-        raise TypeError(
-            "Researcher returned an unexpected result type"
-        )
-
-    _validate_evidence(result, sources)
 
     if result.task_question != cleaned_question:
         result = result.model_copy(

@@ -6,10 +6,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Application configuration loaded from environment variables."""
 
+    llm_provider: str = "openai"
+    llm_api_key: str | None = None
+    llm_base_url: str | None = None
     openai_api_key: str | None = None
     tavily_api_key: str | None = None
     research_model: str | None = None
     worker_model: str | None = None
+    verifier_model: str | None = None
     writer_model: str | None = None
 
     database_url: str = (

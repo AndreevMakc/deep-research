@@ -95,9 +95,11 @@ class WriterTests(unittest.TestCase):
                 self,
                 schema,
                 method,
+                strict,
             ):
                 self.schema = schema
                 self.method = method
+                self.strict = strict
                 return FakeStructuredModel()
 
         model = FakeModel()
@@ -111,6 +113,71 @@ class WriterTests(unittest.TestCase):
         self.assertEqual(result, expected)
         self.assertIs(model.schema, WriterDraft)
         self.assertEqual(model.method, "json_schema")
+
+    def test_retries_semantically_invalid_draft(
+        self,
+    ) -> None:
+        packet = make_packet()
+        valid = WriterDraft(
+            short_answer=[
+                CitedStatement(
+                    text=(
+                        "The system processed "
+                        "42 verified records."
+                    ),
+                    claim_ids=["claim-1"],
+                )
+            ]
+        )
+
+        class FakeStructuredModel:
+            def __init__(self):
+                self.attempts = 0
+
+            def invoke(self, _messages):
+                self.attempts += 1
+                return (
+                    WriterDraft()
+                    if self.attempts == 1
+                    else valid
+                )
+
+        class FakeModel:
+            def __init__(self):
+                self.structured = FakeStructuredModel()
+
+            def with_structured_output(
+                self,
+                schema,
+                method,
+                strict,
+            ):
+                return self.structured
+
+        model = FakeModel()
+
+        with (
+            patch(
+                "app.agents.writer.create_writer_model",
+                return_value=model,
+            ),
+            patch(
+                "app.resilience.get_settings",
+                return_value=type(
+                    "Settings",
+                    (),
+                    {
+                        "external_max_attempts": 2,
+                        "retry_min_wait_seconds": 0,
+                        "retry_max_wait_seconds": 0,
+                    },
+                )(),
+            ),
+        ):
+            result = generate_writer_draft(packet)
+
+        self.assertEqual(result, valid)
+        self.assertEqual(model.structured.attempts, 2)
 
     def test_rejects_rejected_claim_in_main_report(
         self,
@@ -199,6 +266,40 @@ class WriterTests(unittest.TestCase):
             "no qualification",
         ):
             validate_writer_draft(draft, packet)
+
+    def test_allows_numbers_from_known_unanswered_questions(
+        self,
+    ) -> None:
+        packet = make_packet()
+        packet = packet.model_copy(
+            update={
+                "known_unanswered_questions": [
+                    (
+                        "Source https://example.com/article-21 "
+                        "returned HTTP 403."
+                    )
+                ]
+            }
+        )
+        draft = WriterDraft(
+            short_answer=[
+                CitedStatement(
+                    text=(
+                        "The system processed "
+                        "42 verified records."
+                    ),
+                    claim_ids=["claim-1"],
+                )
+            ],
+            unanswered_questions=[
+                (
+                    "Source https://example.com/article-21 "
+                    "returned HTTP 403."
+                )
+            ],
+        )
+
+        validate_writer_draft(draft, packet)
 
     def test_final_report_renders_inline_citation(
         self,

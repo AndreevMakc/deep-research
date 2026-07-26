@@ -2,7 +2,10 @@ from builtins import ExceptionGroup
 import unittest
 
 import httpx
+import groq
 import openai
+from google.genai import errors as google_errors
+from openrouter import errors as openrouter_errors
 
 from app.error_handling import (
     classify_expected_error,
@@ -25,6 +28,26 @@ def api_response(
 
 
 class ErrorHandlingTests(unittest.TestCase):
+    def test_classifies_google_rate_limit_as_retryable(
+        self,
+    ) -> None:
+        error = google_errors.ClientError(
+            429,
+            {
+                "error": {
+                    "message": "quota exceeded",
+                    "status": "RESOURCE_EXHAUSTED",
+                }
+            },
+        )
+
+        result = classify_expected_error(error)
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(result.code, "google_rate_limit")
+        self.assertTrue(result.retryable)
+
     def test_classifies_insufficient_quota(
         self,
     ) -> None:
@@ -149,6 +172,63 @@ class ErrorHandlingTests(unittest.TestCase):
             result.code,
             "openai_model_missing",
         )
+
+    def test_classifies_missing_llm_key(
+        self,
+    ) -> None:
+        result = classify_expected_error(
+            RuntimeError(
+                "LLM_API_KEY or OPENAI_API_KEY "
+                "is not configured"
+            )
+        )
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(result.code, "openai_key_missing")
+        self.assertIn("LLM_API_KEY", result.message)
+
+    def test_classifies_custom_provider_without_url(
+        self,
+    ) -> None:
+        result = classify_expected_error(
+            RuntimeError(
+                "LLM_PROVIDER 'custom' requires LLM_BASE_URL"
+            )
+        )
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(result.code, "llm_provider_invalid")
+
+    def test_classifies_groq_bad_request(
+        self,
+    ) -> None:
+        error = groq.BadRequestError(
+            "Unsupported response format",
+            response=api_response(400),
+            body={"message": "Unsupported response format"},
+        )
+
+        result = classify_expected_error(error)
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(result.code, "groq_bad_request")
+
+    def test_classifies_openrouter_api_error(
+        self,
+    ) -> None:
+        error = openrouter_errors.OpenRouterError(
+            "Provider failed",
+            api_response(500),
+        )
+
+        result = classify_expected_error(error)
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(result.code, "openrouter_api_error")
 
 
 if __name__ == "__main__":

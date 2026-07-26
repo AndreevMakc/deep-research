@@ -16,7 +16,7 @@ from app.db.repositories import (
 )
 from app.db.session import SessionFactory
 from app.error_handling import classify_expected_error
-from app.models import create_worker_model
+from app.models import create_verifier_model
 from app.prompts import load_prompt
 from app.resilience import retry_external_call
 from app.schemas.verification import (
@@ -138,10 +138,11 @@ def generate_verification_result(
     *,
     run_id: uuid.UUID | None = None,
 ) -> VerificationResult:
-    model = create_worker_model()
+    model = create_verifier_model()
     structured_model = model.with_structured_output(
         VerificationResult,
         method="json_schema",
+        strict=True,
     )
     messages = [
         SystemMessage(

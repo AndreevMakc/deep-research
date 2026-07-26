@@ -44,16 +44,66 @@ docker compose up -d
 Заполните в `.env` как минимум:
 
 ```dotenv
-OPENAI_API_KEY=...
+LLM_PROVIDER=openai
+LLM_API_KEY=...
 TAVILY_API_KEY=...
 RESEARCH_MODEL=...
 WORKER_MODEL=...
+VERIFIER_MODEL=...
+WRITER_MODEL=...
 ```
 
+`LLM_PROVIDER` поддерживает `openai`, `openrouter`, `groq`, `google`
+и `ollama`.
+Для произвольного OpenAI-compatible провайдера укажите его имя и
+`LLM_BASE_URL`. Значение `LLM_BASE_URL` всегда переопределяет встроенный URL
+провайдера. Старый `OPENAI_API_KEY` поддерживается как fallback для
+`LLM_API_KEY`; в новых конфигурациях используйте `LLM_API_KEY`. Для локального
+Ollama API-ключ не требуется. OpenRouter и Groq подключаются через их нативные
+LangChain-адаптеры `langchain-openrouter`, `langchain-groq` и
+`langchain-google-genai`; OpenAI, Ollama и произвольные OpenAI-compatible
+endpoints используют `langchain-openai`.
+
 `WORKER_MODEL` можно оставить пустым: тогда Researchers используют
-`RESEARCH_MODEL`. `WRITER_MODEL` последовательно наследует `WORKER_MODEL` и
-`RESEARCH_MODEL`. `.env` содержит секреты, игнорируется Git и не должен попадать
-в коммиты.
+`RESEARCH_MODEL`. `VERIFIER_MODEL` последовательно наследует `WORKER_MODEL` и
+`RESEARCH_MODEL`, а `WRITER_MODEL` использует такую же цепочку fallback.
+Раздельные переменные позволяют закрепить сильную редкую модель за Planner,
+более дешёвую массовую модель за Researchers и более точную модель за
+Verifier. `.env` содержит секреты, игнорируется Git и не должен попадать в
+коммиты.
+
+Примеры конфигурации:
+
+```dotenv
+# OpenAI: дорогая модель планирует, дешёвая ищет,
+# точная проверяет, сбалансированная пишет.
+LLM_PROVIDER=openai
+LLM_API_KEY=...
+RESEARCH_MODEL=gpt-5.6-sol
+WORKER_MODEL=gpt-5.4-mini
+VERIFIER_MODEL=gpt-5.6-terra
+WRITER_MODEL=gpt-5.6-luna
+
+# OpenRouter Free
+LLM_PROVIDER=openrouter
+LLM_API_KEY=...
+RESEARCH_MODEL=openrouter/free
+
+# Groq
+LLM_PROVIDER=groq
+LLM_API_KEY=...
+RESEARCH_MODEL=...
+
+# Google Gemini
+LLM_PROVIDER=google
+LLM_API_KEY=...
+RESEARCH_MODEL=gemini-3.5-flash
+
+# Локальный Ollama
+LLM_PROVIDER=ollama
+LLM_API_KEY=
+RESEARCH_MODEL=qwen3
+```
 
 Подготовьте application-схему и checkpoint-таблицы LangGraph:
 
@@ -296,10 +346,14 @@ smoke tests, SLO checks, offline quality thresholds и собирает producti
 
 | Переменная | Назначение | Значение по умолчанию |
 |---|---|---|
-| `OPENAI_API_KEY` | Ключ OpenAI API | — |
+| `LLM_PROVIDER` | LLM-провайдер: OpenAI, OpenRouter, Groq, Google, Ollama или custom | `openai` |
+| `LLM_API_KEY` | API-ключ выбранного LLM-провайдера | `OPENAI_API_KEY` |
+| `LLM_BASE_URL` | URL OpenAI-compatible API; переопределяет URL провайдера | URL провайдера |
+| `OPENAI_API_KEY` | Устаревший fallback для `LLM_API_KEY` | — |
 | `TAVILY_API_KEY` | Ключ Tavily API | — |
 | `RESEARCH_MODEL` | Модель Planner | — |
 | `WORKER_MODEL` | Модель Researchers | `RESEARCH_MODEL` |
+| `VERIFIER_MODEL` | Модель Verifier | `WORKER_MODEL` |
 | `WRITER_MODEL` | Модель Writer | `WORKER_MODEL` |
 | `DATABASE_URL` | Подключение к PostgreSQL | `postgresql://research:research@localhost:54321/research` |
 | `MAX_PARALLEL_RESEARCHERS` | Параллелизм Researchers | `3` |

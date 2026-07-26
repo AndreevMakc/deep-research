@@ -7,6 +7,7 @@ from collections.abc import Callable
 from typing import ParamSpec, TypeVar
 
 import httpx
+from langchain_core.exceptions import OutputParserException
 from tenacity import (
     RetryCallState,
     Retrying,
@@ -25,6 +26,10 @@ logger = logging.getLogger(__name__)
 
 P = ParamSpec("P")
 T = TypeVar("T")
+
+
+class ExternalOutputValidationError(ValueError):
+    """An external model returned structurally valid, unusable data."""
 
 
 def is_retryable_error(error: BaseException) -> bool:
@@ -46,6 +51,8 @@ def is_retryable_error(error: BaseException) -> bool:
         if isinstance(
             current,
             (
+                OutputParserException,
+                ExternalOutputValidationError,
                 httpx.TimeoutException,
                 httpx.TransportError,
                 socket.gaierror,

@@ -1,6 +1,9 @@
 langgraph
 langchain
 langchain-openai
+langchain-openrouter
+langchain-groq
+langchain-google-genai
 openai>=2.0
 pydantic>=2
 pydantic-settings

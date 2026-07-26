@@ -19,7 +19,7 @@ class EvaluationTests(unittest.TestCase):
         with (
             patch(
                 "app.agents.verifier."
-                "create_worker_model"
+                "create_verifier_model"
             ) as verifier_model,
             patch(
                 "app.agents.writer.create_writer_model"

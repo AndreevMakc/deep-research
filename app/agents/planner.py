@@ -36,6 +36,7 @@ def generate_research_plan(
     structured_model = model.with_structured_output(
         ResearchPlan,
         method="json_schema",
+        strict=True,
     )
 
     system_prompt = load_prompt("planner-v1.md")

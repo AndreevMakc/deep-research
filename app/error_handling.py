@@ -5,6 +5,9 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 import openai
+import groq
+from google.genai import errors as google_errors
+from openrouter import errors as openrouter_errors
 from sqlalchemy.exc import OperationalError
 
 from app.budget import RunLimitExceeded
@@ -44,6 +47,51 @@ class UserError:
             )
 
         return "\n".join(lines)
+
+
+def _classify_google_error(
+    error: google_errors.APIError,
+) -> UserError:
+    status_code = getattr(error, "code", None)
+
+    if status_code in {401, 403}:
+        return UserError(
+            code="google_authentication",
+            message="Google Gemini отклонил API-ключ или доступ.",
+            action=(
+                "проверьте ключ и доступ модели в Google AI Studio."
+            ),
+            retryable=False,
+        )
+
+    if status_code == 429:
+        return UserError(
+            code="google_rate_limit",
+            message="достигнут лимит запросов Google Gemini.",
+            action=(
+                "подождите до сброса RPM-квоты, уменьшите "
+                "параллелизм или подключите billing."
+            ),
+            retryable=True,
+        )
+
+    if status_code is not None and status_code >= 500:
+        return UserError(
+            code="google_server_error",
+            message="Google Gemini временно недоступен.",
+            action="повторите запрос позже.",
+            retryable=True,
+        )
+
+    return UserError(
+        code="google_api_error",
+        message="Google Gemini отклонил запрос.",
+        action=(
+            "проверьте имя модели, входные данные и "
+            "ограничения Gemini API."
+        ),
+        retryable=False,
+    )
 
 
 def _exception_candidates(
@@ -101,7 +149,7 @@ def _mapping_code(value: dict[str, Any]) -> str | None:
 
 
 def _request_id(
-    error: openai.APIError,
+    error: Any,
 ) -> str | None:
     value = getattr(error, "request_id", None)
     return str(value) if value else None
@@ -144,11 +192,12 @@ def _classify_openai_error(
         return UserError(
             code="openai_authentication",
             message=(
-                "OpenAI отклонил API-ключ."
+                "LLM-провайдер отклонил API-ключ."
             ),
             action=(
-                "проверьте OPENAI_API_KEY в .env и убедитесь, "
-                "что ключ активен."
+                "проверьте LLM_API_KEY (или устаревший "
+                "OPENAI_API_KEY) в .env и убедитесь, что "
+                "ключ активен."
             ),
             retryable=False,
             request_id=_request_id(error),
@@ -247,6 +296,185 @@ def _classify_openai_error(
     )
 
 
+def _classify_groq_error(
+    error: groq.GroqError,
+) -> UserError:
+    request_id = _request_id(error)
+
+    if isinstance(error, groq.AuthenticationError):
+        return UserError(
+            code="groq_authentication",
+            message="Groq отклонил API-ключ.",
+            action=(
+                "проверьте LLM_API_KEY в .env и убедитесь, "
+                "что ключ Groq активен."
+            ),
+            retryable=False,
+            request_id=request_id,
+        )
+
+    if isinstance(error, groq.RateLimitError):
+        return UserError(
+            code="groq_rate_limit",
+            message="Groq ограничил запрос по квоте или rate limit.",
+            action=(
+                "подождите и повторите запуск либо уменьшите "
+                "контекст и параллелизм агентов."
+            ),
+            retryable=True,
+            request_id=request_id,
+        )
+
+    if isinstance(
+        error,
+        (groq.BadRequestError, groq.UnprocessableEntityError),
+    ):
+        return UserError(
+            code="groq_bad_request",
+            message="Groq отклонил параметры запроса.",
+            action=(
+                "проверьте модель, structured output и размер "
+                "контекста."
+            ),
+            retryable=False,
+            request_id=request_id,
+        )
+
+    if isinstance(
+        error,
+        (groq.APITimeoutError, groq.APIConnectionError),
+    ):
+        return UserError(
+            code="groq_connection",
+            message="не удалось получить ответ от Groq.",
+            action="проверьте сеть и повторите запуск.",
+            retryable=True,
+            request_id=request_id,
+        )
+
+    if isinstance(
+        error,
+        (groq.InternalServerError,),
+    ):
+        return UserError(
+            code="groq_server_error",
+            message="на стороне Groq произошла временная ошибка.",
+            action="повторите запуск позже.",
+            retryable=True,
+            request_id=request_id,
+        )
+
+    return UserError(
+        code="groq_api_error",
+        message="Groq API вернул ошибку.",
+        action="проверьте настройки провайдера и повторите запуск.",
+        retryable=False,
+        request_id=request_id,
+    )
+
+
+def _classify_openrouter_error(
+    error: openrouter_errors.OpenRouterError,
+) -> UserError:
+    if isinstance(
+        error,
+        openrouter_errors.UnauthorizedResponseError,
+    ):
+        return UserError(
+            code="openrouter_authentication",
+            message="OpenRouter отклонил API-ключ.",
+            action=(
+                "проверьте LLM_API_KEY в .env и убедитесь, "
+                "что ключ OpenRouter активен."
+            ),
+            retryable=False,
+        )
+
+    if isinstance(
+        error,
+        openrouter_errors.PaymentRequiredResponseError,
+    ):
+        return UserError(
+            code="openrouter_balance",
+            message="на балансе OpenRouter недостаточно средств.",
+            action="пополните баланс или выберите бесплатную модель.",
+            retryable=False,
+        )
+
+    if isinstance(
+        error,
+        openrouter_errors.TooManyRequestsResponseError,
+    ):
+        return UserError(
+            code="openrouter_rate_limit",
+            message="OpenRouter временно ограничил запросы.",
+            action=(
+                "подождите и повторите запуск либо уменьшите "
+                "параллелизм агентов."
+            ),
+            retryable=True,
+        )
+
+    if isinstance(
+        error,
+        (
+            openrouter_errors.BadRequestResponseError,
+            openrouter_errors.UnprocessableEntityResponseError,
+            openrouter_errors.PayloadTooLargeResponseError,
+        ),
+    ):
+        return UserError(
+            code="openrouter_bad_request",
+            message="OpenRouter отклонил параметры запроса.",
+            action=(
+                "проверьте модель, structured output и размер "
+                "контекста."
+            ),
+            retryable=False,
+        )
+
+    if isinstance(
+        error,
+        (
+            openrouter_errors.RequestTimeoutResponseError,
+            openrouter_errors.EdgeNetworkTimeoutResponseError,
+            openrouter_errors.NoResponseError,
+        ),
+    ):
+        return UserError(
+            code="openrouter_connection",
+            message="не удалось получить ответ от OpenRouter.",
+            action="проверьте сеть и повторите запуск.",
+            retryable=True,
+        )
+
+    if isinstance(
+        error,
+        (
+            openrouter_errors.InternalServerResponseError,
+            openrouter_errors.BadGatewayResponseError,
+            openrouter_errors.ServiceUnavailableResponseError,
+            openrouter_errors.ProviderOverloadedResponseError,
+        ),
+    ):
+        return UserError(
+            code="openrouter_server_error",
+            message=(
+                "OpenRouter или выбранный upstream-провайдер "
+                "временно недоступен."
+            ),
+            action="повторите запуск позже.",
+            retryable=True,
+        )
+
+    return UserError(
+        code="openrouter_api_error",
+        message="OpenRouter API вернул ошибку.",
+        action="проверьте настройки провайдера и повторите запуск.",
+        retryable=False,
+    )
+
+
 def classify_expected_error(
     error: BaseException,
 ) -> UserError | None:
@@ -265,6 +493,18 @@ def classify_expected_error(
         if isinstance(candidate, openai.OpenAIError):
             return _classify_openai_error(candidate)
 
+        if isinstance(candidate, groq.GroqError):
+            return _classify_groq_error(candidate)
+
+        if isinstance(candidate, google_errors.APIError):
+            return _classify_google_error(candidate)
+
+        if isinstance(
+            candidate,
+            openrouter_errors.OpenRouterError,
+        ):
+            return _classify_openrouter_error(candidate)
+
         if isinstance(candidate, OperationalError):
             return UserError(
                 code="database_unavailable",
@@ -282,14 +522,36 @@ def classify_expected_error(
         if isinstance(candidate, RuntimeError):
             message = str(candidate)
 
-            if "OPENAI_API_KEY is not configured" in message:
+            if (
+                "LLM_API_KEY or OPENAI_API_KEY "
+                "is not configured"
+            ) in message:
                 return UserError(
                     code="openai_key_missing",
                     message=(
-                        "OPENAI_API_KEY не настроен."
+                        "LLM_API_KEY не настроен."
                     ),
                     action=(
-                        "добавьте API-ключ в локальный .env."
+                        "добавьте ключ провайдера в "
+                        "LLM_API_KEY в локальном .env."
+                    ),
+                    retryable=False,
+                )
+
+            if (
+                "LLM_PROVIDER" in message
+                and "requires LLM_BASE_URL" in message
+            ):
+                return UserError(
+                    code="llm_provider_invalid",
+                    message=(
+                        "для выбранного LLM-провайдера "
+                        "не настроен URL API."
+                    ),
+                    action=(
+                        "используйте openai, openrouter, groq, "
+                        "google или ollama либо заполните "
+                        "LLM_BASE_URL в локальном .env."
                     ),
                     retryable=False,
                 )
@@ -320,7 +582,8 @@ def classify_expected_error(
                     action=(
                         "заполните RESEARCH_MODEL и при "
                         "необходимости WORKER_MODEL/"
-                        "WRITER_MODEL в локальном .env."
+                        "VERIFIER_MODEL/WRITER_MODEL "
+                        "в локальном .env."
                     ),
                     retryable=False,
                 )
