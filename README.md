@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./assets/readme/hero.svg" width="100%" alt="Deep Research Pipeline — evidence-first research with traceable sources, quotes, and verdicts">
+  <img src="./assets/readme/hero.svg" width="100%" alt="Deep Research Pipeline — проверяемое исследование с прослеживаемыми источниками, цитатами и выводами">
 </p>
 
 Deep Research Pipeline — экспериментальный self-hosted workflow на Python для
@@ -18,8 +18,8 @@ approval gate.
 </p>
 
 ```text
-Question → Plan → Parallel research → Immutable evidence
-         → Independent verification → Cited report → Human approval
+Вопрос → План → Параллельный поиск → Неизменяемые доказательства
+       → Независимая проверка → Отчёт с цитатами → Экспертное одобрение
 ```
 
 | Инвариант | Что обеспечивает проект |

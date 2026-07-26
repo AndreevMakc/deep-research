@@ -1,132 +1,140 @@
 <svg xmlns="http://www.w3.org/2000/svg"
-     width="1200" height="560" viewBox="0 0 1200 560"
+     width="1200" height="600" viewBox="0 0 1200 600"
      role="img" aria-labelledby="title desc">
-  <title id="title">Deep Research Pipeline workflow</title>
+  <title id="title">Схема Deep Research Pipeline</title>
   <desc id="desc">
-    A question is planned into parallel research tasks. Sources become immutable
-    snapshots and claims. Independent verifiers check the claims before a writer
-    creates a cited report for human review and publication.
+    Вопрос превращается в план и параллельные исследовательские задачи.
+    Источники сохраняются как неизменяемые снимки и выводы. Независимые
+    проверяющие оценивают выводы, после чего автор формирует отчёт для
+    экспертной проверки и публикации.
   </desc>
 
-  <defs>
-    <marker id="arrow" markerWidth="10" markerHeight="10"
-            refX="8" refY="5" orient="auto">
-      <path d="M0 0L10 5L0 10Z" fill="#45D6A8"/>
-    </marker>
-  </defs>
-
-  <rect width="1200" height="560" rx="24" fill="#0B0F14"/>
+  <rect width="1200" height="600" rx="24" fill="#0B0F14"/>
 
   <g font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif">
     <text x="60" y="46" dominant-baseline="hanging"
-          fill="#F2F5F7" font-size="42" font-weight="740">
-      One question. A complete evidence trail.
+          fill="#F2F5F7" font-size="46" font-weight="740">
+      Один вопрос. Полный путь доказательств.
     </text>
-    <text x="60" y="100" dominant-baseline="hanging"
-          fill="#8B98A5" font-size="21">
-      Parallel where speed matters. Immutable where trust matters.
+    <text x="60" y="106" dominant-baseline="hanging"
+          fill="#8B98A5" font-size="22">
+      Параллельно там, где важна скорость. Неизменно там, где важно доверие.
     </text>
   </g>
 
-  <g fill="none" stroke="#45D6A8" stroke-width="3"
-     marker-end="url(#arrow)">
-    <path d="M248 226H302"/>
-    <path d="M530 226H584"/>
-    <path d="M812 226H866"/>
-    <path d="M976 290V350H856"/>
-    <path d="M748 418H694"/>
-    <path d="M466 418H412"/>
+  <g fill="none" stroke="#45D6A8" stroke-width="3">
+    <path d="M300 245H325"/>
+    <path d="M580 245H605"/>
+    <path d="M860 245H885"/>
+    <path d="M1020 310V365"/>
+    <path d="M900 445H875"/>
+    <path d="M620 445H595"/>
+  </g>
+  <g fill="#45D6A8">
+    <path d="M325 236L340 245L325 254Z"/>
+    <path d="M605 236L620 245L605 254Z"/>
+    <path d="M885 236L900 245L885 254Z"/>
+    <path d="M1011 365L1020 380L1029 365Z"/>
+    <path d="M875 436L860 445L875 454Z"/>
+    <path d="M595 436L580 445L595 454Z"/>
   </g>
 
   <g font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif">
-    <g transform="translate(60 166)">
-      <rect width="188" height="120" rx="14" fill="#111A21"
+    <g transform="translate(60 180)">
+      <rect width="240" height="130" rx="14" fill="#111A21"
             stroke="#2A3944" stroke-width="2"/>
-      <text x="22" y="22" dominant-baseline="hanging"
-            fill="#45D6A8" font-size="18" font-weight="700">01 / FRAME</text>
+      <text x="22" y="20" dominant-baseline="hanging"
+            fill="#45D6A8" font-size="18" font-weight="700">
+        01 / ПОСТАНОВКА
+      </text>
       <text x="22" y="56" dominant-baseline="hanging"
-            fill="#F2F5F7" font-size="27" font-weight="680">Planner</text>
-      <text x="22" y="90" dominant-baseline="hanging"
-            fill="#8B98A5" font-size="18">question → tasks</text>
+            fill="#F2F5F7" font-size="28" font-weight="680">Планировщик</text>
+      <text x="22" y="96" dominant-baseline="hanging"
+            fill="#8B98A5" font-size="19">вопрос → задачи</text>
     </g>
 
-    <g transform="translate(302 166)">
-      <rect width="228" height="120" rx="14" fill="#111A21"
+    <g transform="translate(340 180)">
+      <rect width="240" height="130" rx="14" fill="#111A21"
             stroke="#2A3944" stroke-width="2"/>
-      <text x="22" y="22" dominant-baseline="hanging"
-            fill="#45D6A8" font-size="18" font-weight="700">02 / DISCOVER</text>
+      <text x="22" y="20" dominant-baseline="hanging"
+            fill="#45D6A8" font-size="18" font-weight="700">02 / ПОИСК</text>
       <text x="22" y="56" dominant-baseline="hanging"
-            fill="#F2F5F7" font-size="27" font-weight="680">Researchers × N</text>
-      <text x="22" y="90" dominant-baseline="hanging"
-            fill="#8B98A5" font-size="18">search · fetch · extract</text>
+            fill="#F2F5F7" font-size="25" font-weight="680">
+        Исследователи × N
+      </text>
+      <text x="22" y="96" dominant-baseline="hanging"
+            fill="#8B98A5" font-size="18">поиск · загрузка · анализ</text>
     </g>
 
-    <g transform="translate(584 166)">
-      <rect width="228" height="120" rx="14" fill="#111A21"
+    <g transform="translate(620 180)">
+      <rect width="240" height="130" rx="14" fill="#111A21"
             stroke="#2A3944" stroke-width="2"/>
-      <text x="22" y="22" dominant-baseline="hanging"
-            fill="#45D6A8" font-size="18" font-weight="700">03 / PRESERVE</text>
+      <text x="22" y="20" dominant-baseline="hanging"
+            fill="#45D6A8" font-size="18" font-weight="700">
+        03 / СОХРАНЕНИЕ
+      </text>
       <text x="22" y="56" dominant-baseline="hanging"
-            fill="#F2F5F7" font-size="27" font-weight="680">Evidence store</text>
-      <text x="22" y="90" dominant-baseline="hanging"
-            fill="#8B98A5" font-size="18">snapshot · quote · claim</text>
+            fill="#F2F5F7" font-size="25" font-weight="680">
+        База доказательств
+      </text>
+      <text x="22" y="96" dominant-baseline="hanging"
+            fill="#8B98A5" font-size="18">снимок · цитата · вывод</text>
     </g>
 
-    <g transform="translate(866 166)">
-      <rect width="274" height="120" rx="14" fill="#111A21"
+    <g transform="translate(900 180)">
+      <rect width="240" height="130" rx="14" fill="#111A21"
             stroke="#2A3944" stroke-width="2"/>
-      <text x="22" y="22" dominant-baseline="hanging"
-            fill="#45D6A8" font-size="18" font-weight="700">04 / CHALLENGE</text>
+      <text x="22" y="20" dominant-baseline="hanging"
+            fill="#45D6A8" font-size="18" font-weight="700">04 / ПРОВЕРКА</text>
       <text x="22" y="56" dominant-baseline="hanging"
-            fill="#F2F5F7" font-size="27" font-weight="680">Verifiers × N</text>
-      <text x="22" y="90" dominant-baseline="hanging"
-            fill="#8B98A5" font-size="18">evidence · scope · numbers</text>
+            fill="#F2F5F7" font-size="25" font-weight="680">
+        Проверяющие × N
+      </text>
+      <text x="22" y="96" dominant-baseline="hanging"
+            fill="#8B98A5" font-size="18">доказательства · числа</text>
     </g>
 
-    <g transform="translate(748 358)">
-      <rect width="228" height="120" rx="14" fill="#111A21"
+    <g transform="translate(900 380)">
+      <rect width="240" height="130" rx="14" fill="#111A21"
             stroke="#2A3944" stroke-width="2"/>
-      <text x="22" y="22" dominant-baseline="hanging"
-            fill="#45D6A8" font-size="18" font-weight="700">05 / SYNTHESIZE</text>
+      <text x="22" y="20" dominant-baseline="hanging"
+            fill="#45D6A8" font-size="18" font-weight="700">05 / СИНТЕЗ</text>
       <text x="22" y="56" dominant-baseline="hanging"
-            fill="#F2F5F7" font-size="27" font-weight="680">Writer</text>
-      <text x="22" y="90" dominant-baseline="hanging"
-            fill="#8B98A5" font-size="18">verified claims only</text>
+            fill="#F2F5F7" font-size="28" font-weight="680">Автор отчёта</text>
+      <text x="22" y="96" dominant-baseline="hanging"
+            fill="#8B98A5" font-size="18">только проверенные выводы</text>
     </g>
 
-    <g transform="translate(466 358)">
-      <rect width="228" height="120" rx="14" fill="#111A21"
+    <g transform="translate(620 380)">
+      <rect width="240" height="130" rx="14" fill="#111A21"
             stroke="#2A3944" stroke-width="2"/>
-      <text x="22" y="22" dominant-baseline="hanging"
-            fill="#F0B35A" font-size="18" font-weight="700">06 / DECIDE</text>
+      <text x="22" y="20" dominant-baseline="hanging"
+            fill="#F0B35A" font-size="18" font-weight="700">06 / РЕШЕНИЕ</text>
       <text x="22" y="56" dominant-baseline="hanging"
-            fill="#F2F5F7" font-size="27" font-weight="680">Human review</text>
-      <text x="22" y="90" dominant-baseline="hanging"
-            fill="#8B98A5" font-size="18">approve · reject · research</text>
+            fill="#F2F5F7" font-size="25" font-weight="680">
+        Экспертная проверка
+      </text>
+      <text x="22" y="96" dominant-baseline="hanging"
+            fill="#8B98A5" font-size="17">принять · отклонить · уточнить</text>
     </g>
 
-    <g transform="translate(184 358)">
-      <rect width="228" height="120" rx="14" fill="#15231F"
+    <g transform="translate(340 380)">
+      <rect width="240" height="130" rx="14" fill="#15231F"
             stroke="#45D6A8" stroke-width="2"/>
-      <text x="22" y="22" dominant-baseline="hanging"
-            fill="#45D6A8" font-size="18" font-weight="700">07 / DELIVER</text>
+      <text x="22" y="20" dominant-baseline="hanging"
+            fill="#45D6A8" font-size="18" font-weight="700">07 / РЕЗУЛЬТАТ</text>
       <text x="22" y="56" dominant-baseline="hanging"
-            fill="#F2F5F7" font-size="27" font-weight="680">Cited report</text>
-      <text x="22" y="90" dominant-baseline="hanging"
+            fill="#F2F5F7" font-size="27" font-weight="680">
+        Отчёт с цитатами
+      </text>
+      <text x="22" y="96" dominant-baseline="hanging"
             fill="#8B98A5" font-size="18">Markdown · JSON · API</text>
     </g>
   </g>
 
-  <g font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-     font-size="17" fill="#60707C">
-    <text x="60" y="520">durable checkpoints</text>
-    <text x="258" y="520">/</text>
-    <text x="282" y="520">bounded concurrency</text>
-    <text x="492" y="520">/</text>
-    <text x="516" y="520">retry + recovery</text>
-    <text x="696" y="520">/</text>
-    <text x="720" y="520">tenant isolation</text>
-    <text x="890" y="520">/</text>
-    <text x="914" y="520">structured telemetry</text>
-  </g>
+  <text x="60" y="552" dominant-baseline="hanging"
+        fill="#60707C" font-size="17"
+        font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
+    контрольные точки  /  восстановление после ошибок  /  изоляция данных  /  телеметрия
+  </text>
 </svg>

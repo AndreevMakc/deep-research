@@ -3,8 +3,8 @@
      role="img" aria-labelledby="title desc">
   <title id="title">Deep Research Pipeline</title>
   <desc id="desc">
-    Evidence-first research orchestration from a question through immutable
-    sources and independent verification to a cited, reviewable report.
+    Проверяемое исследование: от вопроса через неизменяемые источники и
+    независимую проверку к отчёту с цитатами.
   </desc>
 
   <defs>
@@ -24,7 +24,7 @@
     <text x="0" y="0" dominant-baseline="hanging"
           fill="#45D6A8" font-size="20" font-weight="700"
           font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-          letter-spacing="2">EVIDENCE-FIRST RESEARCH</text>
+          letter-spacing="1.5">ИССЛЕДОВАНИЯ С ДОКАЗАТЕЛЬСТВАМИ</text>
 
     <text x="0" y="72" dominant-baseline="hanging"
           fill="#F2F5F7" font-size="70" font-weight="760"
@@ -40,12 +40,12 @@
     <text x="2" y="245" dominant-baseline="hanging"
           fill="#AAB5BF" font-size="26" font-weight="450"
           font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif">
-      Trace every conclusion to a source snapshot,
+      Каждый вывод связан со снимком источника,
     </text>
     <text x="2" y="280" dominant-baseline="hanging"
           fill="#AAB5BF" font-size="26" font-weight="450"
           font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif">
-      exact quote, and independent verdict.
+      точной цитатой и независимой проверкой.
     </text>
   </g>
 
@@ -55,14 +55,14 @@
 
     <g font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
       <text x="28" y="36" dominant-baseline="hanging"
-            fill="#72818D" font-size="18">PROVENANCE / RUN</text>
+            fill="#72818D" font-size="18">ПРОИСХОЖДЕНИЕ / ЗАПУСК</text>
 
       <g transform="translate(28 78)">
         <circle cx="10" cy="10" r="8" fill="#45D6A8"/>
         <text x="38" y="0" dominant-baseline="hanging"
-              fill="#F2F5F7" font-size="22">SOURCE SNAPSHOT</text>
+              fill="#F2F5F7" font-size="22">СНИМОК ИСТОЧНИКА</text>
         <text x="38" y="32" dominant-baseline="hanging"
-              fill="#72818D" font-size="18">sha256 · immutable</text>
+              fill="#72818D" font-size="18">sha256 · неизменяемый</text>
       </g>
 
       <path d="M38 106V154" stroke="url(#signal)" stroke-width="3"/>
@@ -70,9 +70,9 @@
       <g transform="translate(28 154)">
         <circle cx="10" cy="10" r="8" fill="#45D6A8"/>
         <text x="38" y="0" dominant-baseline="hanging"
-              fill="#F2F5F7" font-size="22">CLAIM + QUOTE</text>
+              fill="#F2F5F7" font-size="22">ВЫВОД + ЦИТАТА</text>
         <text x="38" y="32" dominant-baseline="hanging"
-              fill="#72818D" font-size="18">locator · coordinates</text>
+              fill="#72818D" font-size="18">раздел · координаты</text>
       </g>
 
       <path d="M38 182V230" stroke="url(#signal)" stroke-width="3"/>
@@ -80,9 +80,9 @@
       <g transform="translate(28 230)">
         <circle cx="10" cy="10" r="8" fill="#45D6A8"/>
         <text x="38" y="0" dominant-baseline="hanging"
-              fill="#F2F5F7" font-size="22">VERIFIED REPORT</text>
+              fill="#F2F5F7" font-size="22">ПРОВЕРЕННЫЙ ОТЧЁТ</text>
         <text x="38" y="32" dominant-baseline="hanging"
-              fill="#F0B35A" font-size="18">human approval gate</text>
+              fill="#F0B35A" font-size="18">экспертное одобрение</text>
       </g>
     </g>
   </g>
