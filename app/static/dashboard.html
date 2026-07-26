@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Deep Research Review</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+    body { max-width: 1100px; margin: 0 auto; padding: 24px; }
+    header, .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    input, button, select { padding: 8px 10px; }
+    input { min-width: 320px; }
+    button { cursor: pointer; }
+    main { display: grid; grid-template-columns: 300px 1fr; gap: 24px; margin-top: 24px; }
+    section { border: 1px solid #8886; border-radius: 10px; padding: 16px; }
+    .run, .claim { border-bottom: 1px solid #8884; padding: 12px 0; }
+    .run button { width: 100%; text-align: left; }
+    .muted { opacity: .7; font-size: .9rem; }
+    .error { color: #d33; white-space: pre-wrap; }
+    blockquote { margin-left: 0; border-left: 3px solid #888; padding-left: 12px; }
+    @media (max-width: 760px) { main { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Deep Research Review</h1>
+    <input id="token" type="password" placeholder="API bearer token">
+    <button id="connect">Подключиться</button>
+  </header>
+  <p class="muted">Token хранится только в sessionStorage текущей вкладки.</p>
+  <p id="message" class="error"></p>
+  <main>
+    <section>
+      <h2>Runs</h2>
+      <div id="runs"></div>
+    </section>
+    <section>
+      <h2 id="title">Provenance</h2>
+      <div id="details">Выберите run.</div>
+    </section>
+  </main>
+  <script>
+    const tokenInput = document.querySelector("#token");
+    const runsNode = document.querySelector("#runs");
+    const detailsNode = document.querySelector("#details");
+    const messageNode = document.querySelector("#message");
+    tokenInput.value = sessionStorage.getItem("dr-token") || "";
+
+    function element(tag, text, className) {
+      const node = document.createElement(tag);
+      if (text !== undefined) node.textContent = text;
+      if (className) node.className = className;
+      return node;
+    }
+
+    async function request(path, options = {}) {
+      const token = tokenInput.value.trim();
+      const headers = {
+        Authorization: `Bearer ${token}`,
+        ...(options.body ? {"Content-Type": "application/json"} : {}),
+        ...(options.method && options.method !== "GET"
+          ? {"Idempotency-Key": crypto.randomUUID()} : {}),
+        ...(options.headers || {})
+      };
+      const response = await fetch(path, {...options, headers});
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || JSON.stringify(data));
+      return data;
+    }
+
+    async function mutate(path, body) {
+      const reason = prompt("Причина решения:");
+      if (!reason) return;
+      await request(path, {
+        method: "POST",
+        body: JSON.stringify({...body, reason})
+      });
+      messageNode.textContent = "Решение сохранено.";
+    }
+
+    async function loadRuns() {
+      sessionStorage.setItem("dr-token", tokenInput.value.trim());
+      messageNode.textContent = "";
+      runsNode.replaceChildren();
+      const runs = await request("/api/v1/runs");
+      for (const run of runs) {
+        const wrapper = element("div", undefined, "run");
+        const button = element("button", run.question);
+        button.addEventListener("click", () => loadRun(run.id));
+        wrapper.append(button, element("div", run.status, "muted"));
+        runsNode.append(wrapper);
+      }
+    }
+
+    async function loadRun(runId) {
+      messageNode.textContent = "";
+      detailsNode.replaceChildren();
+      const data = await request(`/api/v1/runs/${runId}/provenance`);
+      document.querySelector("#title").textContent = `Run ${runId}`;
+      for (const claim of data.claims) {
+        const card = element("div", undefined, "claim");
+        card.append(
+          element("strong", claim.text),
+          element("div", `${claim.status} / ${claim.review_status}`, "muted")
+        );
+        const actions = element("div", undefined, "row");
+        for (const decision of ["approve", "reject", "research"]) {
+          const button = element("button", decision);
+          button.addEventListener("click", async () => {
+            await mutate(`/api/v1/claims/${claim.id}/review`, {decision});
+            await loadRun(runId);
+          });
+          actions.append(button);
+        }
+        card.append(actions);
+        detailsNode.append(card);
+      }
+      if (data.report) {
+        const report = element("section");
+        report.append(element("h3", `Report: ${data.report.review_status}`));
+        const approve = element("button", "approve report");
+        approve.addEventListener("click", async () => {
+          await mutate(`/api/v1/runs/${runId}/review`, {decision: "approve"});
+          await loadRun(runId);
+        });
+        const publish = element("button", "publish");
+        publish.addEventListener("click", async () => {
+          await mutate(`/api/v1/runs/${runId}/publish`, {});
+          await loadRun(runId);
+        });
+        report.append(approve, publish);
+        detailsNode.append(report);
+      }
+    }
+
+    document.querySelector("#connect").addEventListener("click", () => {
+      loadRuns().catch(error => messageNode.textContent = error.message);
+    });
+    window.addEventListener("unhandledrejection", event => {
+      messageNode.textContent = event.reason?.message || String(event.reason);
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,132 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1200" height="560" viewBox="0 0 1200 560"
+     role="img" aria-labelledby="title desc">
+  <title id="title">Deep Research Pipeline workflow</title>
+  <desc id="desc">
+    A question is planned into parallel research tasks. Sources become immutable
+    snapshots and claims. Independent verifiers check the claims before a writer
+    creates a cited report for human review and publication.
+  </desc>
+
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10"
+            refX="8" refY="5" orient="auto">
+      <path d="M0 0L10 5L0 10Z" fill="#45D6A8"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="560" rx="24" fill="#0B0F14"/>
+
+  <g font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif">
+    <text x="60" y="46" dominant-baseline="hanging"
+          fill="#F2F5F7" font-size="42" font-weight="740">
+      One question. A complete evidence trail.
+    </text>
+    <text x="60" y="100" dominant-baseline="hanging"
+          fill="#8B98A5" font-size="21">
+      Parallel where speed matters. Immutable where trust matters.
+    </text>
+  </g>
+
+  <g fill="none" stroke="#45D6A8" stroke-width="3"
+     marker-end="url(#arrow)">
+    <path d="M248 226H302"/>
+    <path d="M530 226H584"/>
+    <path d="M812 226H866"/>
+    <path d="M976 290V350H856"/>
+    <path d="M748 418H694"/>
+    <path d="M466 418H412"/>
+  </g>
+
+  <g font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif">
+    <g transform="translate(60 166)">
+      <rect width="188" height="120" rx="14" fill="#111A21"
+            stroke="#2A3944" stroke-width="2"/>
+      <text x="22" y="22" dominant-baseline="hanging"
+            fill="#45D6A8" font-size="18" font-weight="700">01 / FRAME</text>
+      <text x="22" y="56" dominant-baseline="hanging"
+            fill="#F2F5F7" font-size="27" font-weight="680">Planner</text>
+      <text x="22" y="90" dominant-baseline="hanging"
+            fill="#8B98A5" font-size="18">question → tasks</text>
+    </g>
+
+    <g transform="translate(302 166)">
+      <rect width="228" height="120" rx="14" fill="#111A21"
+            stroke="#2A3944" stroke-width="2"/>
+      <text x="22" y="22" dominant-baseline="hanging"
+            fill="#45D6A8" font-size="18" font-weight="700">02 / DISCOVER</text>
+      <text x="22" y="56" dominant-baseline="hanging"
+            fill="#F2F5F7" font-size="27" font-weight="680">Researchers × N</text>
+      <text x="22" y="90" dominant-baseline="hanging"
+            fill="#8B98A5" font-size="18">search · fetch · extract</text>
+    </g>
+
+    <g transform="translate(584 166)">
+      <rect width="228" height="120" rx="14" fill="#111A21"
+            stroke="#2A3944" stroke-width="2"/>
+      <text x="22" y="22" dominant-baseline="hanging"
+            fill="#45D6A8" font-size="18" font-weight="700">03 / PRESERVE</text>
+      <text x="22" y="56" dominant-baseline="hanging"
+            fill="#F2F5F7" font-size="27" font-weight="680">Evidence store</text>
+      <text x="22" y="90" dominant-baseline="hanging"
+            fill="#8B98A5" font-size="18">snapshot · quote · claim</text>
+    </g>
+
+    <g transform="translate(866 166)">
+      <rect width="274" height="120" rx="14" fill="#111A21"
+            stroke="#2A3944" stroke-width="2"/>
+      <text x="22" y="22" dominant-baseline="hanging"
+            fill="#45D6A8" font-size="18" font-weight="700">04 / CHALLENGE</text>
+      <text x="22" y="56" dominant-baseline="hanging"
+            fill="#F2F5F7" font-size="27" font-weight="680">Verifiers × N</text>
+      <text x="22" y="90" dominant-baseline="hanging"
+            fill="#8B98A5" font-size="18">evidence · scope · numbers</text>
+    </g>
+
+    <g transform="translate(748 358)">
+      <rect width="228" height="120" rx="14" fill="#111A21"
+            stroke="#2A3944" stroke-width="2"/>
+      <text x="22" y="22" dominant-baseline="hanging"
+            fill="#45D6A8" font-size="18" font-weight="700">05 / SYNTHESIZE</text>
+      <text x="22" y="56" dominant-baseline="hanging"
+            fill="#F2F5F7" font-size="27" font-weight="680">Writer</text>
+      <text x="22" y="90" dominant-baseline="hanging"
+            fill="#8B98A5" font-size="18">verified claims only</text>
+    </g>
+
+    <g transform="translate(466 358)">
+      <rect width="228" height="120" rx="14" fill="#111A21"
+            stroke="#2A3944" stroke-width="2"/>
+      <text x="22" y="22" dominant-baseline="hanging"
+            fill="#F0B35A" font-size="18" font-weight="700">06 / DECIDE</text>
+      <text x="22" y="56" dominant-baseline="hanging"
+            fill="#F2F5F7" font-size="27" font-weight="680">Human review</text>
+      <text x="22" y="90" dominant-baseline="hanging"
+            fill="#8B98A5" font-size="18">approve · reject · research</text>
+    </g>
+
+    <g transform="translate(184 358)">
+      <rect width="228" height="120" rx="14" fill="#15231F"
+            stroke="#45D6A8" stroke-width="2"/>
+      <text x="22" y="22" dominant-baseline="hanging"
+            fill="#45D6A8" font-size="18" font-weight="700">07 / DELIVER</text>
+      <text x="22" y="56" dominant-baseline="hanging"
+            fill="#F2F5F7" font-size="27" font-weight="680">Cited report</text>
+      <text x="22" y="90" dominant-baseline="hanging"
+            fill="#8B98A5" font-size="18">Markdown · JSON · API</text>
+    </g>
+  </g>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+     font-size="17" fill="#60707C">
+    <text x="60" y="520">durable checkpoints</text>
+    <text x="258" y="520">/</text>
+    <text x="282" y="520">bounded concurrency</text>
+    <text x="492" y="520">/</text>
+    <text x="516" y="520">retry + recovery</text>
+    <text x="696" y="520">/</text>
+    <text x="720" y="520">tenant isolation</text>
+    <text x="890" y="520">/</text>
+    <text x="914" y="520">structured telemetry</text>
+  </g>
+</svg>
