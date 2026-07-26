@@ -1,88 +1,135 @@
 <svg xmlns="http://www.w3.org/2000/svg"
-     width="1200" height="400" viewBox="0 0 1200 400"
+     width="1200" height="420" viewBox="0 0 1200 420"
      role="img" aria-labelledby="title desc">
   <title id="title">Deep Research Pipeline</title>
   <desc id="desc">
-    Проверяемое исследование: от вопроса через неизменяемые источники и
-    независимую проверку к отчёту с цитатами.
+    Self-hosted research pipeline, где каждый вывод проходит путь от
+    неизменяемого снимка источника и точной цитаты до независимого verdict.
   </desc>
 
   <defs>
-    <linearGradient id="signal" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#45D6A8"/>
-      <stop offset="1" stop-color="#8AE8C8"/>
-    </linearGradient>
-    <pattern id="ledger" width="40" height="40" patternUnits="userSpaceOnUse">
-      <path d="M40 0H0V40" fill="none" stroke="#1B2730" stroke-width="1"/>
+    <pattern id="coordinates" width="32" height="32"
+             patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#20272C"
+            stroke-width="1"/>
     </pattern>
   </defs>
 
-  <rect width="1200" height="400" rx="24" fill="#0B0F14"/>
-  <rect width="1200" height="400" rx="24" fill="url(#ledger)" opacity=".55"/>
+  <rect width="1200" height="420" rx="22" fill="#0A0D0F"/>
+  <rect width="1200" height="420" rx="22" fill="url(#coordinates)"
+        opacity=".46"/>
+  <path d="M650 38V382" stroke="#30383E" stroke-width="1"/>
 
-  <g transform="translate(64 54)">
+  <g id="title-block" transform="translate(58 48)">
     <text x="0" y="0" dominant-baseline="hanging"
-          fill="#45D6A8" font-size="20" font-weight="700"
-          font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
-          letter-spacing="1.5">ИССЛЕДОВАНИЯ С ДОКАЗАТЕЛЬСТВАМИ</text>
+          fill="#61D6B2" font-size="18" font-weight="700"
+          letter-spacing="1.8"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
+      SELF-HOSTED · LANGGRAPH · EVIDENCE-FIRST
+    </text>
 
-    <text x="0" y="72" dominant-baseline="hanging"
-          fill="#F2F5F7" font-size="70" font-weight="760"
+    <text x="0" y="65" dominant-baseline="hanging"
+          fill="#F4F1E8" font-size="68" font-weight="760"
           font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif">
       Deep Research
     </text>
-    <text x="0" y="146" dominant-baseline="hanging"
-          fill="#F2F5F7" font-size="70" font-weight="760"
+    <text x="0" y="136" dominant-baseline="hanging"
+          fill="#F4F1E8" font-size="68" font-weight="760"
           font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif">
       Pipeline
     </text>
 
-    <text x="2" y="245" dominant-baseline="hanging"
-          fill="#AAB5BF" font-size="26" font-weight="450"
+    <text x="2" y="242" dominant-baseline="hanging"
+          fill="#A6AFB5" font-size="24"
           font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif">
-      Каждый вывод связан со снимком источника,
+      Исследование, где каждый вывод можно
     </text>
-    <text x="2" y="280" dominant-baseline="hanging"
-          fill="#AAB5BF" font-size="26" font-weight="450"
+    <text x="2" y="276" dominant-baseline="hanging"
+          fill="#A6AFB5" font-size="24"
           font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif">
-      точной цитатой и независимой проверкой.
+      проследить до источника и проверить.
     </text>
+
+    <g transform="translate(0 334)"
+       font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+       font-size="16" fill="#7F8B93">
+      <text x="0" y="0">PYTHON 3.11+</text>
+      <text x="150" y="0">POSTGRESQL</text>
+      <text x="290" y="0">MULTI-PROVIDER LLM</text>
+    </g>
   </g>
 
-  <g transform="translate(744 52)">
-    <rect width="392" height="296" rx="18" fill="#101820"
-          stroke="#2A3944" stroke-width="2"/>
+  <g id="evidence-contract" transform="translate(700 38)">
+    <rect width="442" height="344" rx="16" fill="#111619"
+          stroke="#394248" stroke-width="1.5"/>
 
-    <g font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
-      <text x="28" y="36" dominant-baseline="hanging"
-            fill="#72818D" font-size="18">ПРОИСХОЖДЕНИЕ / ЗАПУСК</text>
+    <text x="26" y="23" dominant-baseline="hanging"
+          fill="#F4F1E8" font-size="20" font-weight="700"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
+      EVIDENCE CONTRACT
+    </text>
+    <circle cx="398" cy="34" r="6" fill="#61D6B2"/>
+    <text x="26" y="53" dominant-baseline="hanging"
+          fill="#7F8B93" font-size="16"
+          font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
+      SOURCE → QUOTE → CLAIM → VERDICT
+    </text>
 
-      <g transform="translate(28 78)">
-        <circle cx="10" cy="10" r="8" fill="#45D6A8"/>
-        <text x="38" y="0" dominant-baseline="hanging"
-              fill="#F2F5F7" font-size="22">СНИМОК ИСТОЧНИКА</text>
-        <text x="38" y="32" dominant-baseline="hanging"
-              fill="#72818D" font-size="18">sha256 · неизменяемый</text>
+    <path d="M52 106V285" stroke="#465158" stroke-width="2"/>
+
+    <g font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif">
+      <g transform="translate(28 94)">
+        <circle cx="24" cy="18" r="10" fill="#0A0D0F"
+                stroke="#61D6B2" stroke-width="3"/>
+        <text x="54" y="0" dominant-baseline="hanging"
+              fill="#F4F1E8" font-size="21" font-weight="680">
+          Source snapshot
+        </text>
+        <text x="54" y="29" dominant-baseline="hanging"
+              fill="#7F8B93" font-size="18">
+          URL · sha256 · byte size
+        </text>
       </g>
 
-      <path d="M38 106V154" stroke="url(#signal)" stroke-width="3"/>
-
-      <g transform="translate(28 154)">
-        <circle cx="10" cy="10" r="8" fill="#45D6A8"/>
-        <text x="38" y="0" dominant-baseline="hanging"
-              fill="#F2F5F7" font-size="22">ВЫВОД + ЦИТАТА</text>
-        <text x="38" y="32" dominant-baseline="hanging"
-              fill="#72818D" font-size="18">раздел · координаты</text>
+      <g transform="translate(28 157)">
+        <circle cx="24" cy="18" r="10" fill="#0A0D0F"
+                stroke="#61D6B2" stroke-width="3"/>
+        <text x="54" y="0" dominant-baseline="hanging"
+              fill="#F4F1E8" font-size="21" font-weight="680">
+          Exact quote
+        </text>
+        <text x="54" y="29" dominant-baseline="hanging"
+              fill="#7F8B93" font-size="18">
+          locator · start:end
+        </text>
       </g>
 
-      <path d="M38 182V230" stroke="url(#signal)" stroke-width="3"/>
+      <g transform="translate(28 220)">
+        <circle cx="24" cy="18" r="10" fill="#0A0D0F"
+                stroke="#61D6B2" stroke-width="3"/>
+        <text x="54" y="0" dominant-baseline="hanging"
+              fill="#F4F1E8" font-size="21" font-weight="680">
+          Claim
+        </text>
+        <text x="54" y="29" dominant-baseline="hanging"
+              fill="#7F8B93" font-size="18">
+          scope · numbers · citation
+        </text>
+      </g>
 
-      <g transform="translate(28 230)">
-        <circle cx="10" cy="10" r="8" fill="#45D6A8"/>
-        <text x="38" y="0" dominant-baseline="hanging"
-              fill="#F2F5F7" font-size="22">ПРОВЕРЕННЫЙ ОТЧЁТ</text>
-        <text x="38" y="32" dominant-baseline="hanging"
-              fill="#F0B35A" font-size="18">экспертное одобрение</text>
+      <g transform="translate(28 283)">
+        <circle cx="24" cy="18" r="10" fill="#61D6B2"/>
+        <path d="M19 18L23 22L30 13" fill="none"
+              stroke="#0A0D0F" stroke-width="2.5"
+              stroke-linecap="round" stroke-linejoin="round"/>
+        <text x="54" y="0" dominant-baseline="hanging"
+              fill="#61D6B2" font-size="21" font-weight="720">
+          Independent verdict
+        </text>
+        <text x="306" y="3" dominant-baseline="hanging"
+              fill="#F0B45A" font-size="17" font-weight="700">
+          HUMAN GATE
+        </text>
       </g>
     </g>
   </g>
