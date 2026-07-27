@@ -326,11 +326,14 @@ curl -X POST http://localhost:8000/api/v1/runs \
 Webhook delivery подписывается `X-Deep-Research-Signature` в формате
 `sha256=<HMAC>` и повторяется с exponential backoff.
 
-Production-контур:
+Локальная проверка production-подобного Compose-контура:
 
 ```bash
 docker compose -f compose.production.yml up --build
 ```
+
+Это локальный запуск. Production environment и автоматический deployment в
+проекте не настроены; CI ничего не публикует и никуда не развёртывает.
 
 ## Качество и эксплуатация
 
@@ -359,11 +362,12 @@ python -m app.ops events <run-id> --reviewer reviewer
 ```
 
 GitHub Actions применяет миграции, запускает static analysis, unit/database
-smoke tests, offline quality thresholds, SLO checks и собирает production
-image.
+smoke tests, offline quality thresholds, SLO checks и проверяет сборку Docker
+image без публикации и деплоя.
 
 Подробные процедуры:
 
+- [Правила разработки и pull request](CONTRIBUTING.md)
 - [Operations guide](docs/operations.md)
 - [Deployment runbook](docs/deployment-runbook.md)
 - [Research pipeline roadmap](docs/research-pipeline-roadmap.md)

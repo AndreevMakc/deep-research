@@ -1,5 +1,11 @@
 # Production deployment and rollback runbook
 
+> [!IMPORTANT]
+> Этот документ является справочным черновиком. Production environment и
+> deployment workflow пока не настроены и не авторизованы. CI не выполняет
+> команды из этого runbook. Любой первый deployment требует отдельного
+> решения и pull request.
+
 ## Pre-deployment
 
 1. Create a backup with `python -m app.maintenance backup ./backups`.
