@@ -14,7 +14,10 @@ from app.db.models import (
     ApiIdentity,
     ApiRole,
     BrowserSession,
+    ResearchReport,
+    ResearchRun,
     ReviewerIdentity,
+    RunStatus,
     Tenant,
 )
 from app.db.session import SessionFactory
@@ -250,6 +253,233 @@ class BrowserAuthenticationTests(unittest.TestCase):
                 f"/api/v1/runs/{run_id}/provenance"
             )
             self.assertEqual(denied.status_code, 403)
+        finally:
+            researcher_client.close()
+
+    def test_library_supports_title_archive_and_ownership(
+        self,
+    ) -> None:
+        password = "Researcher password 123!"
+        self._create_researcher(password=password)
+        self._create_researcher(
+            login="other-researcher",
+            password="Other researcher password 123!",
+        )
+        researcher_client = TestClient(
+            app,
+            base_url="https://testserver",
+        )
+        other_client = TestClient(
+            app,
+            base_url="https://testserver",
+        )
+
+        try:
+            self.assertEqual(
+                self._login(
+                    researcher_client,
+                    login="researcher",
+                    password=password,
+                ).status_code,
+                200,
+            )
+            self.assertEqual(
+                self._login(
+                    other_client,
+                    login="other-researcher",
+                    password=(
+                        "Other researcher password 123!"
+                    ),
+                ).status_code,
+                200,
+            )
+            self.assertEqual(
+                researcher_client.get(
+                    "/api/v1/runs"
+                ).json(),
+                [],
+            )
+            invalid = researcher_client.post(
+                "/api/v1/runs",
+                headers={
+                    **self._csrf_headers(
+                        researcher_client
+                    ),
+                    "Idempotency-Key": (
+                        "library-invalid-run-0001"
+                    ),
+                },
+                json={"question": "   "},
+            )
+            self.assertEqual(invalid.status_code, 422)
+            created = researcher_client.post(
+                "/api/v1/runs",
+                headers={
+                    **self._csrf_headers(
+                        researcher_client
+                    ),
+                    "Idempotency-Key": (
+                        "library-create-run-0001"
+                    ),
+                },
+                json={
+                    "question": (
+                        "Какие факторы влияют на выбор?"
+                    )
+                },
+            )
+            self.assertEqual(created.status_code, 202)
+            self.assertEqual(
+                created.json()["title"],
+                "Какие факторы влияют на выбор",
+            )
+            run_id = created.json()["run_id"]
+            second = researcher_client.post(
+                "/api/v1/runs",
+                headers={
+                    **self._csrf_headers(
+                        researcher_client
+                    ),
+                    "Idempotency-Key": (
+                        "library-create-run-0002"
+                    ),
+                },
+                json={"question": "Второе исследование"},
+            )
+            self.assertEqual(second.status_code, 202)
+            updated = researcher_client.patch(
+                f"/api/v1/runs/{run_id}",
+                headers=self._csrf_headers(
+                    researcher_client
+                ),
+                json={"title": "Новый заголовок"},
+            )
+            self.assertEqual(updated.status_code, 200)
+            self.assertEqual(
+                updated.json()["title"],
+                "Новый заголовок",
+            )
+            self.assertTrue(updated.json()["can_manage"])
+
+            denied = other_client.patch(
+                f"/api/v1/runs/{run_id}",
+                headers=self._csrf_headers(other_client),
+                json={"archived": True},
+            )
+            self.assertEqual(denied.status_code, 403)
+
+            archived = researcher_client.patch(
+                f"/api/v1/runs/{run_id}",
+                headers=self._csrf_headers(
+                    researcher_client
+                ),
+                json={"archived": True},
+            )
+            self.assertEqual(
+                archived.json()["group"],
+                "archived",
+            )
+            library = researcher_client.get(
+                "/api/v1/runs"
+            )
+            self.assertEqual(library.status_code, 200)
+            self.assertEqual(
+                library.json()[0]["id"],
+                run_id,
+            )
+            self.assertEqual(
+                library.json()[0]["group"],
+                "archived",
+            )
+        finally:
+            researcher_client.close()
+            other_client.close()
+
+    def test_unread_result_is_per_user(
+        self,
+    ) -> None:
+        password = "Researcher password 123!"
+        self._create_researcher(password=password)
+        researcher_client = TestClient(
+            app,
+            base_url="https://testserver",
+        )
+
+        try:
+            self.assertEqual(
+                self._login(
+                    researcher_client,
+                    login="researcher",
+                    password=password,
+                ).status_code,
+                200,
+            )
+            created = researcher_client.post(
+                "/api/v1/runs",
+                headers={
+                    **self._csrf_headers(
+                        researcher_client
+                    ),
+                    "Idempotency-Key": (
+                        "library-unread-run-0001"
+                    ),
+                },
+                json={"question": "Готов ли результат?"},
+            )
+            self.assertEqual(created.status_code, 202)
+            run_id = uuid.UUID(created.json()["run_id"])
+
+            with SessionFactory() as session:
+                run = session.get(ResearchRun, run_id)
+                self.assertIsNotNone(run)
+                run.status = RunStatus.COMPLETED
+                run.updated_at = datetime.now(timezone.utc)
+                session.add(
+                    ResearchReport(
+                        run_id=run.id,
+                        markdown_path="report.md",
+                        json_path="report.json",
+                        markdown_hash="a" * 64,
+                        json_hash="b" * 64,
+                        result_json={"summary": "Ready"},
+                    )
+                )
+                session.commit()
+
+            researcher_library = researcher_client.get(
+                "/api/v1/runs"
+            ).json()
+            admin_library = self.client.get(
+                "/api/v1/runs"
+            ).json()
+            self.assertTrue(
+                researcher_library[0]["unread_result"]
+            )
+            self.assertTrue(
+                admin_library[0]["unread_result"]
+            )
+            self.assertEqual(
+                researcher_library[0]["version_count"],
+                1,
+            )
+
+            marked = researcher_client.post(
+                f"/api/v1/runs/{run_id}/read",
+                headers=self._csrf_headers(
+                    researcher_client
+                ),
+            )
+            self.assertEqual(marked.status_code, 200)
+            self.assertFalse(
+                researcher_client.get(
+                    "/api/v1/runs"
+                ).json()[0]["unread_result"]
+            )
+            self.assertTrue(
+                self.client.get(
+                    "/api/v1/runs"
+                ).json()[0]["unread_result"]
+            )
         finally:
             researcher_client.close()
 

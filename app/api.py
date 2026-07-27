@@ -26,7 +26,7 @@ from fastapi.security import (
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.config import get_settings
 from app.db.models import (
@@ -35,6 +35,7 @@ from app.db.models import (
     Claim,
     IdempotencyRecord,
     ResearchRun,
+    ResearchRunView,
     ReviewDecisionType,
     RunStatus,
     Tenant,
@@ -50,6 +51,7 @@ from app.db.repositories import (
 )
 from app.db.session import SessionFactory
 from app.health import readiness
+from app.library import generate_run_title, library_group
 from app.multitenancy import (
     API_PERMISSIONS,
     authenticate_api_token,
@@ -87,6 +89,15 @@ bearer = HTTPBearer(
 
 class CreateRunRequest(BaseModel):
     question: str = Field(min_length=3, max_length=10_000)
+
+
+class UpdateRunRequest(BaseModel):
+    title: str | None = Field(
+        default=None,
+        min_length=3,
+        max_length=160,
+    )
+    archived: bool | None = None
 
 
 class LoginRequest(BaseModel):
@@ -241,6 +252,9 @@ def _identity_payload(identity: ApiIdentity) -> dict:
         "csrf_cookie_name": settings.csrf_cookie_name,
         "capabilities": {
             "create_run": "create_run" in permissions,
+            "manage_library": (
+                "manage_library" in permissions
+            ),
             "view_provenance": (
                 "view_provenance" in permissions
             ),
@@ -435,6 +449,92 @@ def _tenant_reviewer(
     )
 
 
+def _run_seen_at(
+    session: Session,
+    *,
+    run_id: uuid.UUID,
+    identity_id: uuid.UUID,
+) -> datetime | None:
+    return session.scalar(
+        select(ResearchRunView.result_seen_at).where(
+            ResearchRunView.run_id == run_id,
+            ResearchRunView.identity_id == identity_id,
+        )
+    )
+
+
+def _library_run_payload(
+    run: ResearchRun,
+    *,
+    result_seen_at: datetime | None,
+    can_manage: bool,
+) -> dict:
+    report_updated_at = (
+        run.report.updated_at
+        if run.report is not None
+        else None
+    )
+    return {
+        "id": str(run.id),
+        "title": run.title,
+        "question": run.question,
+        "status": run.status.value,
+        "group": library_group(run),
+        "author": (
+            run.created_by.subject
+            if run.created_by is not None
+            else None
+        ),
+        "version_count": (
+            1 if run.report is not None else 0
+        ),
+        "unread_result": (
+            report_updated_at is not None
+            and (
+                result_seen_at is None
+                or result_seen_at < report_updated_at
+            )
+        ),
+        "created_at": run.created_at,
+        "updated_at": run.updated_at,
+        "archived_at": run.archived_at,
+        "can_manage": can_manage,
+    }
+
+
+def _require_library_owner(
+    identity: ApiIdentity,
+    run: ResearchRun,
+) -> None:
+    _require(identity, "manage_library")
+
+    if (
+        identity.role != ApiRole.ADMIN
+        and run.created_by_identity_id != identity.id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Only the author or an admin can "
+                "change this research"
+            ),
+        )
+
+
+def _can_manage_library_run(
+    identity: ApiIdentity,
+    run: ResearchRun,
+) -> bool:
+    return (
+        "manage_library"
+        in API_PERMISSIONS[identity.role]
+        and (
+            identity.role == ApiRole.ADMIN
+            or run.created_by_identity_id == identity.id
+        )
+    )
+
+
 @app.get("/health/live")
 def live() -> dict:
     return {"status": "alive"}
@@ -608,7 +708,15 @@ def create_run(
     session: SessionDependency,
 ):
     _require(identity, "create_run")
-    payload = body.model_dump(mode="json")
+    question = body.question.strip()
+
+    if len(question) < 3:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Question must contain at least 3 characters",
+        )
+
+    payload = {"question": question}
     request_hash = _request_hash("create_run", payload)
     cached = _cached_idempotency(
         session,
@@ -621,10 +729,12 @@ def create_run(
         return cached
 
     settings = get_settings()
+    title = generate_run_title(question)
     run = ResearchRun(
         tenant_id=identity.tenant_id,
         created_by_identity_id=identity.id,
-        question=body.question.strip(),
+        question=question,
+        title=title,
         status=RunStatus.CREATED,
         max_external_requests=settings.max_external_requests,
         max_sources=settings.max_sources,
@@ -650,6 +760,7 @@ def create_run(
         "run_id": str(run.id),
         "work_item_id": str(item.id),
         "status": run.status.value,
+        "title": run.title,
     }
     _store_idempotency(
         session,
@@ -688,26 +799,41 @@ def list_runs(
     runs = list(
         session.scalars(
             select(ResearchRun)
+            .options(
+                selectinload(ResearchRun.created_by),
+                selectinload(ResearchRun.report),
+            )
             .where(
                 ResearchRun.tenant_id
                 == identity.tenant_id
             )
-            .order_by(ResearchRun.created_at.desc())
+            .order_by(ResearchRun.updated_at.desc())
             .limit(100)
         ).all()
     )
+    seen_by_run = dict(
+        session.execute(
+            select(
+                ResearchRunView.run_id,
+                ResearchRunView.result_seen_at,
+            ).where(
+                ResearchRunView.identity_id
+                == identity.id,
+                ResearchRunView.run_id.in_(
+                    [run.id for run in runs]
+                ),
+            )
+        ).all()
+    )
     return [
-        {
-            "id": str(run.id),
-            "question": run.question,
-            "status": run.status.value,
-            "author": (
-                run.created_by.subject
-                if run.created_by is not None
-                else None
+        _library_run_payload(
+            run,
+            result_seen_at=seen_by_run.get(run.id),
+            can_manage=_can_manage_library_run(
+                identity,
+                run,
             ),
-            "created_at": run.created_at,
-        }
+        )
         for run in runs
     ]
 
@@ -720,17 +846,109 @@ def get_run(
 ) -> dict:
     _require(identity, "view")
     run = _tenant_run(session, identity, run_id)
-    return {
-        "id": str(run.id),
-        "question": run.question,
-        "status": run.status.value,
-        "author": (
-            run.created_by.subject
-            if run.created_by is not None
-            else None
+    return _library_run_payload(
+        run,
+        result_seen_at=_run_seen_at(
+            session,
+            run_id=run.id,
+            identity_id=identity.id,
         ),
-        "created_at": run.created_at,
-        "updated_at": run.updated_at,
+        can_manage=_can_manage_library_run(
+            identity,
+            run,
+        ),
+    )
+
+
+@app.patch("/api/v1/runs/{run_id}")
+def update_run(
+    run_id: uuid.UUID,
+    body: UpdateRunRequest,
+    identity: IdentityDependency,
+    session: SessionDependency,
+) -> dict:
+    run = _tenant_run(session, identity, run_id)
+    _require_library_owner(identity, run)
+
+    if body.title is None and body.archived is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Provide title or archived state",
+        )
+
+    if body.title is not None:
+        title = " ".join(body.title.split())
+
+        if len(title) < 3:
+            raise HTTPException(
+                status_code=(
+                    status.HTTP_422_UNPROCESSABLE_CONTENT
+                ),
+                detail="Title must contain 3-160 characters",
+            )
+
+        run.title = title
+
+    if body.archived is not None:
+        run.archived_at = (
+            datetime.now(timezone.utc)
+            if body.archived
+            else None
+        )
+
+    session.commit()
+    session.refresh(run)
+    return _library_run_payload(
+        run,
+        result_seen_at=_run_seen_at(
+            session,
+            run_id=run.id,
+            identity_id=identity.id,
+        ),
+        can_manage=_can_manage_library_run(
+            identity,
+            run,
+        ),
+    )
+
+
+@app.post("/api/v1/runs/{run_id}/read")
+def mark_run_read(
+    run_id: uuid.UUID,
+    identity: IdentityDependency,
+    session: SessionDependency,
+) -> dict:
+    _require(identity, "view")
+    run = _tenant_run(session, identity, run_id)
+
+    if run.report is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Research result is not available",
+        )
+
+    view = session.scalar(
+        select(ResearchRunView).where(
+            ResearchRunView.run_id == run.id,
+            ResearchRunView.identity_id == identity.id,
+        )
+    )
+
+    if view is None:
+        view = ResearchRunView(
+            tenant_id=identity.tenant_id,
+            run_id=run.id,
+            identity_id=identity.id,
+            result_seen_at=run.report.updated_at,
+        )
+        session.add(view)
+    else:
+        view.result_seen_at = run.report.updated_at
+
+    session.commit()
+    return {
+        "run_id": str(run.id),
+        "unread_result": False,
     }
 
 

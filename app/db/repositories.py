@@ -24,6 +24,7 @@ from app.db.models import (
     Verification,
     VerificationVerdict,
 )
+from app.library import generate_run_title
 
 
 def create_research_run(
@@ -36,6 +37,7 @@ def create_research_run(
     limits = limits or {}
     run = ResearchRun(
         question=question,
+        title=generate_run_title(question),
         status=RunStatus.CREATED,
         tenant_id=tenant_id,
         max_external_requests=limits.get(
