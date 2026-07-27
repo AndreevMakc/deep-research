@@ -33,6 +33,7 @@ REQUIRED_TABLES = {
     "operational_events",
     "tenants",
     "api_identities",
+    "browser_sessions",
     "work_items",
     "idempotency_records",
     "webhook_subscriptions",

@@ -137,6 +137,17 @@ class ResearchRun(Base):
         index=True,
     )
 
+    created_by_identity_id: Mapped[
+        uuid.UUID | None
+    ] = mapped_column(
+        ForeignKey(
+            "api_identities.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
+    )
+
     question: Mapped[str] = mapped_column(Text, nullable=False)
 
     status: Mapped[RunStatus] = mapped_column(
@@ -249,6 +260,10 @@ class ResearchRun(Base):
 
     tenant: Mapped["Tenant | None"] = relationship(
         back_populates="runs"
+    )
+
+    created_by: Mapped["ApiIdentity | None"] = relationship(
+        back_populates="created_runs"
     )
 
     work_items: Mapped[list["WorkItem"]] = relationship(
@@ -1061,11 +1076,16 @@ class ApiIdentity(Base):
         nullable=False,
     )
 
-    token_hash: Mapped[str] = mapped_column(
+    token_hash: Mapped[str | None] = mapped_column(
         String(64),
-        nullable=False,
+        nullable=True,
         unique=True,
         index=True,
+    )
+
+    password_hash: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
     )
 
     active: Mapped[bool] = mapped_column(
@@ -1088,6 +1108,68 @@ class ApiIdentity(Base):
     ] = relationship(
         back_populates="identity",
         cascade="all, delete-orphan",
+    )
+
+    sessions: Mapped[list["BrowserSession"]] = relationship(
+        back_populates="identity",
+        cascade="all, delete-orphan",
+    )
+
+    created_runs: Mapped[list["ResearchRun"]] = relationship(
+        back_populates="created_by",
+    )
+
+
+class BrowserSession(Base):
+    __tablename__ = "browser_sessions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    identity_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey(
+            "api_identities.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    token_hash: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        index=True,
+    )
+
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    identity: Mapped["ApiIdentity"] = relationship(
+        back_populates="sessions"
     )
 
 

@@ -91,6 +91,7 @@ def main() -> None:
         assert "operational_events" in tables
         assert "tenants" in tables
         assert "api_identities" in tables
+        assert "browser_sessions" in tables
         assert "work_items" in tables
         assert "idempotency_records" in tables
         assert "webhook_subscriptions" in tables
@@ -106,6 +107,12 @@ def main() -> None:
                 "research_runs"
             )
         }
+        identity_columns = {
+            column["name"]
+            for column in inspector.get_columns(
+                "api_identities"
+            )
+        }
         report_columns = {
             column["name"]
             for column in inspector.get_columns(
@@ -114,6 +121,7 @@ def main() -> None:
         }
         assert {
             "started_at",
+            "created_by_identity_id",
             "max_external_requests",
             "max_sources",
             "max_claims",
@@ -122,6 +130,7 @@ def main() -> None:
             "external_requests_used",
             "tokens_used",
         } <= run_columns
+        assert "password_hash" in identity_columns
         assert {
             "review_status",
             "approved_at",
@@ -211,6 +220,7 @@ def main() -> None:
                 "operational_events",
                 "tenants",
                 "api_identities",
+                "browser_sessions",
                 "work_items",
                 "idempotency_records",
                 "webhook_subscriptions",

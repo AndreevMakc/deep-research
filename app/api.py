@@ -13,6 +13,7 @@ from fastapi import (
     FastAPI,
     Header,
     HTTPException,
+    Request,
     Response,
     status,
 )
@@ -30,6 +31,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db.models import (
     ApiIdentity,
+    ApiRole,
     Claim,
     IdempotencyRecord,
     ResearchRun,
@@ -49,8 +51,15 @@ from app.db.repositories import (
 from app.db.session import SessionFactory
 from app.health import readiness
 from app.multitenancy import (
+    API_PERMISSIONS,
     authenticate_api_token,
+    authenticate_browser_session,
+    authenticate_password,
     authorize_api,
+    create_browser_session,
+    create_password_identity,
+    reset_identity_password,
+    revoke_browser_session,
     reviewer_subject,
 )
 from app.operations import (
@@ -72,11 +81,28 @@ app = FastAPI(
 )
 bearer = HTTPBearer(
     bearerFormat="DeepResearchToken",
+    auto_error=False,
 )
 
 
 class CreateRunRequest(BaseModel):
     question: str = Field(min_length=3, max_length=10_000)
+
+
+class LoginRequest(BaseModel):
+    tenant: str = Field(min_length=1, max_length=100)
+    login: str = Field(min_length=3, max_length=255)
+    password: str = Field(min_length=12, max_length=256)
+
+
+class CreateAccountRequest(BaseModel):
+    login: str = Field(min_length=3, max_length=255)
+    role: ApiRole
+    password: str = Field(min_length=12, max_length=256)
+
+
+class ResetPasswordRequest(BaseModel):
+    password: str = Field(min_length=12, max_length=256)
 
 
 class ClaimReviewRequest(BaseModel):
@@ -114,22 +140,67 @@ SessionDependency = Annotated[
 
 
 def current_identity(
+    request: Request,
     credentials: Annotated[
-        HTTPAuthorizationCredentials,
+        HTTPAuthorizationCredentials | None,
         Depends(bearer),
     ],
     session: SessionDependency,
 ) -> ApiIdentity:
+    if credentials is not None:
+        try:
+            return authenticate_api_token(
+                session,
+                credentials.credentials,
+            )
+        except PermissionError as error:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=str(error),
+            ) from error
+
+    settings = get_settings()
+    token = request.cookies.get(
+        settings.session_cookie_name
+    )
+
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required",
+        )
+
     try:
-        return authenticate_api_token(
+        identity, _ = authenticate_browser_session(
             session,
-            credentials.credentials,
+            token,
         )
     except PermissionError as error:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(error),
         ) from error
+
+    if request.method not in {"GET", "HEAD", "OPTIONS"}:
+        csrf_cookie = request.cookies.get(
+            settings.csrf_cookie_name
+        )
+        csrf_header = request.headers.get("X-CSRF-Token")
+
+        if (
+            not csrf_cookie
+            or not csrf_header
+            or not secrets.compare_digest(
+                csrf_cookie,
+                csrf_header,
+            )
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Invalid CSRF token",
+            )
+
+    return identity
 
 
 IdentityDependency = Annotated[
@@ -157,6 +228,77 @@ def _require(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=str(error),
         ) from error
+
+
+def _identity_payload(identity: ApiIdentity) -> dict:
+    permissions = API_PERMISSIONS[identity.role]
+    settings = get_settings()
+    return {
+        "id": str(identity.id),
+        "tenant_id": str(identity.tenant_id),
+        "login": identity.subject,
+        "role": identity.role.value,
+        "csrf_cookie_name": settings.csrf_cookie_name,
+        "capabilities": {
+            "create_run": "create_run" in permissions,
+            "view_provenance": (
+                "view_provenance" in permissions
+            ),
+            "review_claim": (
+                "review_claim" in permissions
+            ),
+            "review_report": (
+                "review_report" in permissions
+            ),
+            "publish": "publish" in permissions,
+            "manage_accounts": (
+                "manage_identities" in permissions
+            ),
+        },
+    }
+
+
+def _set_auth_cookies(
+    response: Response,
+    *,
+    session_token: str,
+    csrf_token: str,
+) -> None:
+    settings = get_settings()
+    max_age = settings.session_lifetime_days * 86_400
+    cookie_options = {
+        "max_age": max_age,
+        "secure": settings.session_cookie_secure,
+        "samesite": "strict",
+        "path": "/",
+    }
+    response.set_cookie(
+        settings.session_cookie_name,
+        session_token,
+        httponly=True,
+        **cookie_options,
+    )
+    response.set_cookie(
+        settings.csrf_cookie_name,
+        csrf_token,
+        httponly=False,
+        **cookie_options,
+    )
+
+
+def _clear_auth_cookies(response: Response) -> None:
+    settings = get_settings()
+
+    for name in (
+        settings.session_cookie_name,
+        settings.csrf_cookie_name,
+    ):
+        response.delete_cookie(
+            name,
+            path="/",
+            secure=settings.session_cookie_secure,
+            samesite="strict",
+        )
 
 
 def _request_hash(
@@ -298,6 +440,141 @@ def live() -> dict:
     return {"status": "alive"}
 
 
+@app.post("/api/v1/auth/login")
+def login(
+    body: LoginRequest,
+    response: Response,
+    session: SessionDependency,
+) -> dict:
+    try:
+        identity = authenticate_password(
+            session,
+            tenant_slug=body.tenant,
+            subject=body.login,
+            password=body.password,
+        )
+    except PermissionError as error:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(error),
+        ) from error
+
+    settings = get_settings()
+    _, session_token = create_browser_session(
+        session,
+        identity=identity,
+        lifetime=timedelta(
+            days=settings.session_lifetime_days
+        ),
+    )
+    csrf_token = secrets.token_urlsafe(32)
+    _set_auth_cookies(
+        response,
+        session_token=session_token,
+        csrf_token=csrf_token,
+    )
+    return _identity_payload(identity)
+
+
+@app.get("/api/v1/auth/session")
+def get_auth_session(
+    identity: IdentityDependency,
+) -> dict:
+    return _identity_payload(identity)
+
+
+@app.post(
+    "/api/v1/auth/logout",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def logout(
+    request: Request,
+    response: Response,
+    identity: IdentityDependency,
+    session: SessionDependency,
+) -> Response:
+    del identity
+    settings = get_settings()
+    token = request.cookies.get(
+        settings.session_cookie_name
+    )
+
+    if token:
+        revoke_browser_session(session, token)
+
+    _clear_auth_cookies(response)
+    response.status_code = status.HTTP_204_NO_CONTENT
+    return response
+
+
+@app.post(
+    "/api/v1/admin/accounts",
+    status_code=status.HTTP_201_CREATED,
+)
+def create_account(
+    body: CreateAccountRequest,
+    identity: IdentityDependency,
+    session: SessionDependency,
+) -> dict:
+    _require(identity, "manage_identities")
+    tenant = session.get(Tenant, identity.tenant_id)
+
+    if tenant is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Tenant is unavailable",
+        )
+
+    try:
+        created = create_password_identity(
+            session,
+            tenant=tenant,
+            subject=body.login,
+            role=body.role,
+            password=body.password,
+            actor=identity,
+        )
+    except (PermissionError, ValueError) as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(error),
+        ) from error
+
+    return _identity_payload(created)
+
+
+@app.post(
+    "/api/v1/admin/accounts/{identity_id}/reset-password"
+)
+def reset_account_password(
+    identity_id: uuid.UUID,
+    body: ResetPasswordRequest,
+    identity: IdentityDependency,
+    session: SessionDependency,
+) -> dict:
+    _require(identity, "manage_identities")
+
+    try:
+        updated = reset_identity_password(
+            session,
+            actor=identity,
+            identity_id=identity_id,
+            password=body.password,
+        )
+    except LookupError as error:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Identity not found",
+        ) from error
+    except (PermissionError, ValueError) as error:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(error),
+        ) from error
+
+    return _identity_payload(updated)
+
+
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard() -> str:
     return (
@@ -346,6 +623,7 @@ def create_run(
     settings = get_settings()
     run = ResearchRun(
         tenant_id=identity.tenant_id,
+        created_by_identity_id=identity.id,
         question=body.question.strip(),
         status=RunStatus.CREATED,
         max_external_requests=settings.max_external_requests,
@@ -423,6 +701,11 @@ def list_runs(
             "id": str(run.id),
             "question": run.question,
             "status": run.status.value,
+            "author": (
+                run.created_by.subject
+                if run.created_by is not None
+                else None
+            ),
             "created_at": run.created_at,
         }
         for run in runs
@@ -441,6 +724,11 @@ def get_run(
         "id": str(run.id),
         "question": run.question,
         "status": run.status.value,
+        "author": (
+            run.created_by.subject
+            if run.created_by is not None
+            else None
+        ),
         "created_at": run.created_at,
         "updated_at": run.updated_at,
     }
@@ -452,7 +740,7 @@ def get_provenance(
     identity: IdentityDependency,
     session: SessionDependency,
 ) -> dict:
-    _require(identity, "view")
+    _require(identity, "view_provenance")
     run = _tenant_run(session, identity, run_id)
     report = get_research_report(session, run.id)
     return {

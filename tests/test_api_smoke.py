@@ -91,6 +91,8 @@ def main() -> None:
     dashboard = client.get("/dashboard")
     assert dashboard.status_code == 200
     assert "Deep Research Review" in dashboard.text
+    assert "API bearer token" not in dashboard.text
+    assert 'id="login-form"' in dashboard.text
     unauthenticated = client.get("/api/v1/runs")
     assert unauthenticated.status_code in {401, 403}
 

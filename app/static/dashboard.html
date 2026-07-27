@@ -5,46 +5,78 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Deep Research Review</title>
   <style>
-    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
-    body { max-width: 1100px; margin: 0 auto; padding: 24px; }
+    :root { color-scheme: light; font-family: system-ui, sans-serif; }
+    body { max-width: 1100px; margin: 0 auto; padding: 24px; color: #183129; }
     header, .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-    input, button, select { padding: 8px 10px; }
-    input { min-width: 320px; }
+    header h1 { flex: 1; }
+    input, button, select { padding: 9px 11px; font: inherit; }
+    input { min-width: 280px; }
     button { cursor: pointer; }
     main { display: grid; grid-template-columns: 300px 1fr; gap: 24px; margin-top: 24px; }
-    section { border: 1px solid #8886; border-radius: 10px; padding: 16px; }
-    .run, .claim { border-bottom: 1px solid #8884; padding: 12px 0; }
+    section { border: 1px solid #b7c7c0; border-radius: 10px; padding: 16px; }
+    .login { max-width: 430px; margin: 12vh auto 0; }
+    .login label { display: grid; gap: 5px; margin: 14px 0; }
+    .login input { min-width: 0; }
+    .run, .claim { border-bottom: 1px solid #dce5e1; padding: 12px 0; }
     .run button { width: 100%; text-align: left; }
-    .muted { opacity: .7; font-size: .9rem; }
-    .error { color: #d33; white-space: pre-wrap; }
-    blockquote { margin-left: 0; border-left: 3px solid #888; padding-left: 12px; }
+    .muted { color: #5c7068; font-size: .9rem; }
+    .error { color: #a32a2a; white-space: pre-wrap; }
+    blockquote { margin-left: 0; border-left: 3px solid #4b8d72; padding-left: 12px; }
+    [hidden] { display: none !important; }
     @media (max-width: 760px) { main { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
-  <header>
+  <section id="login-view" class="login">
     <h1>Deep Research Review</h1>
-    <input id="token" type="password" placeholder="API bearer token">
-    <button id="connect">Подключиться</button>
-  </header>
-  <p class="muted">Token хранится только в sessionStorage текущей вкладки.</p>
-  <p id="message" class="error"></p>
-  <main>
-    <section>
-      <h2>Runs</h2>
-      <div id="runs"></div>
-    </section>
-    <section>
-      <h2 id="title">Provenance</h2>
-      <div id="details">Выберите run.</div>
-    </section>
-  </main>
+    <p class="muted">Войдите в общее пространство исследований.</p>
+    <form id="login-form">
+      <label>
+        Пространство
+        <input id="tenant" name="tenant" autocomplete="organization" required>
+      </label>
+      <label>
+        Логин
+        <input id="login" name="login" autocomplete="username" required>
+      </label>
+      <label>
+        Пароль
+        <input id="password" name="password" type="password"
+               autocomplete="current-password" minlength="12" required>
+      </label>
+      <button type="submit">Войти</button>
+    </form>
+    <p id="login-message" class="error" role="alert"></p>
+  </section>
+
+  <div id="workspace" hidden>
+    <header>
+      <h1>Deep Research Review</h1>
+      <span id="identity" class="muted"></span>
+      <button id="logout" type="button">Выйти</button>
+    </header>
+    <p id="message" class="error" role="alert"></p>
+    <main>
+      <section>
+        <h2>Исследования</h2>
+        <div id="runs"></div>
+      </section>
+      <section>
+        <h2 id="title">Provenance</h2>
+        <div id="details">Выберите исследование.</div>
+      </section>
+    </main>
+  </div>
+
   <script>
-    const tokenInput = document.querySelector("#token");
+    const loginView = document.querySelector("#login-view");
+    const workspace = document.querySelector("#workspace");
+    const loginMessage = document.querySelector("#login-message");
+    const messageNode = document.querySelector("#message");
     const runsNode = document.querySelector("#runs");
     const detailsNode = document.querySelector("#details");
-    const messageNode = document.querySelector("#message");
-    tokenInput.value = sessionStorage.getItem("dr-token") || "";
+    let currentIdentity = null;
+    let csrfCookieName = "dr_csrf";
 
     function element(tag, text, className) {
       const node = document.createElement(tag);
@@ -53,19 +85,43 @@
       return node;
     }
 
+    function cookie(name) {
+      const prefix = `${encodeURIComponent(name)}=`;
+      const item = document.cookie.split("; ").find(value => value.startsWith(prefix));
+      return item ? decodeURIComponent(item.slice(prefix.length)) : "";
+    }
+
     async function request(path, options = {}) {
-      const token = tokenInput.value.trim();
+      const method = options.method || "GET";
       const headers = {
-        Authorization: `Bearer ${token}`,
         ...(options.body ? {"Content-Type": "application/json"} : {}),
-        ...(options.method && options.method !== "GET"
+        ...(method !== "GET" && method !== "HEAD"
+          ? {"X-CSRF-Token": cookie(csrfCookieName)} : {}),
+        ...(options.idempotent
           ? {"Idempotency-Key": crypto.randomUUID()} : {}),
         ...(options.headers || {})
       };
-      const response = await fetch(path, {...options, headers});
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || JSON.stringify(data));
+      const response = await fetch(path, {...options, method, headers});
+      const data = response.status === 204 ? null : await response.json();
+      if (!response.ok) throw new Error(data?.detail || JSON.stringify(data));
       return data;
+    }
+
+    function showLogin() {
+      currentIdentity = null;
+      workspace.hidden = true;
+      loginView.hidden = false;
+      document.querySelector("#password").value = "";
+    }
+
+    async function showWorkspace(identity) {
+      currentIdentity = identity;
+      csrfCookieName = identity.csrf_cookie_name;
+      loginView.hidden = true;
+      workspace.hidden = false;
+      document.querySelector("#identity").textContent =
+        `${identity.login} · ${identity.role}`;
+      await loadRuns();
     }
 
     async function mutate(path, body) {
@@ -73,28 +129,49 @@
       if (!reason) return;
       await request(path, {
         method: "POST",
+        idempotent: true,
         body: JSON.stringify({...body, reason})
       });
       messageNode.textContent = "Решение сохранено.";
     }
 
     async function loadRuns() {
-      sessionStorage.setItem("dr-token", tokenInput.value.trim());
       messageNode.textContent = "";
       runsNode.replaceChildren();
       const runs = await request("/api/v1/runs");
       for (const run of runs) {
         const wrapper = element("div", undefined, "run");
         const button = element("button", run.question);
+        button.type = "button";
         button.addEventListener("click", () => loadRun(run.id));
-        wrapper.append(button, element("div", run.status, "muted"));
+        wrapper.append(
+          button,
+          element(
+            "div",
+            `${run.status} · ${run.author || "автор не указан"}`,
+            "muted"
+          )
+        );
         runsNode.append(wrapper);
+      }
+      if (!runs.length) {
+        runsNode.append(element("p", "Исследований пока нет.", "muted"));
       }
     }
 
     async function loadRun(runId) {
       messageNode.textContent = "";
       detailsNode.replaceChildren();
+      if (!currentIdentity.capabilities.view_provenance) {
+        detailsNode.append(
+          element(
+            "p",
+            "Технический provenance доступен только аналитику или администратору.",
+            "muted"
+          )
+        );
+        return;
+      }
       const data = await request(`/api/v1/runs/${runId}/provenance`);
       document.querySelector("#title").textContent = `Run ${runId}`;
       for (const claim of data.claims) {
@@ -103,39 +180,75 @@
           element("strong", claim.text),
           element("div", `${claim.status} / ${claim.review_status}`, "muted")
         );
-        const actions = element("div", undefined, "row");
-        for (const decision of ["approve", "reject", "research"]) {
-          const button = element("button", decision);
-          button.addEventListener("click", async () => {
-            await mutate(`/api/v1/claims/${claim.id}/review`, {decision});
-            await loadRun(runId);
-          });
-          actions.append(button);
+        if (currentIdentity.capabilities.review_claim) {
+          const actions = element("div", undefined, "row");
+          for (const decision of ["approve", "reject", "research"]) {
+            const button = element("button", decision);
+            button.type = "button";
+            button.addEventListener("click", async () => {
+              await mutate(`/api/v1/claims/${claim.id}/review`, {decision});
+              await loadRun(runId);
+            });
+            actions.append(button);
+          }
+          card.append(actions);
         }
-        card.append(actions);
         detailsNode.append(card);
       }
       if (data.report) {
         const report = element("section");
         report.append(element("h3", `Report: ${data.report.review_status}`));
-        const approve = element("button", "approve report");
-        approve.addEventListener("click", async () => {
-          await mutate(`/api/v1/runs/${runId}/review`, {decision: "approve"});
-          await loadRun(runId);
-        });
-        const publish = element("button", "publish");
-        publish.addEventListener("click", async () => {
-          await mutate(`/api/v1/runs/${runId}/publish`, {});
-          await loadRun(runId);
-        });
-        report.append(approve, publish);
+        if (currentIdentity.capabilities.review_report) {
+          const approve = element("button", "approve report");
+          approve.type = "button";
+          approve.addEventListener("click", async () => {
+            await mutate(`/api/v1/runs/${runId}/review`, {decision: "approve"});
+            await loadRun(runId);
+          });
+          report.append(approve);
+        }
+        if (currentIdentity.capabilities.publish) {
+          const publish = element("button", "publish");
+          publish.type = "button";
+          publish.addEventListener("click", async () => {
+            await mutate(`/api/v1/runs/${runId}/publish`, {});
+            await loadRun(runId);
+          });
+          report.append(publish);
+        }
         detailsNode.append(report);
       }
     }
 
-    document.querySelector("#connect").addEventListener("click", () => {
-      loadRuns().catch(error => messageNode.textContent = error.message);
+    document.querySelector("#login-form").addEventListener("submit", async event => {
+      event.preventDefault();
+      loginMessage.textContent = "";
+      try {
+        const identity = await request("/api/v1/auth/login", {
+          method: "POST",
+          body: JSON.stringify({
+            tenant: document.querySelector("#tenant").value,
+            login: document.querySelector("#login").value,
+            password: document.querySelector("#password").value
+          })
+        });
+        await showWorkspace(identity);
+      } catch (error) {
+        loginMessage.textContent = error.message;
+      }
     });
+
+    document.querySelector("#logout").addEventListener("click", async () => {
+      try {
+        await request("/api/v1/auth/logout", {method: "POST"});
+      } finally {
+        showLogin();
+      }
+    });
+
+    request("/api/v1/auth/session")
+      .then(showWorkspace)
+      .catch(showLogin);
     window.addEventListener("unhandledrejection", event => {
       messageNode.textContent = event.reason?.message || String(event.reason);
     });

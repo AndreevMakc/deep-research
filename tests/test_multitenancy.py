@@ -4,7 +4,9 @@ from app.db.models import ApiIdentity, ApiRole
 from app.multitenancy import (
     authorize_api,
     hash_api_token,
+    hash_password,
     reviewer_subject,
+    verify_password,
 )
 from app.webhooks import signature, validate_webhook_url
 
@@ -28,6 +30,55 @@ class MultitenancyTests(unittest.TestCase):
 
         with self.assertRaises(PermissionError):
             authorize_api(identity, "create_run")
+
+    def test_password_hash_is_salted_and_verifiable(
+        self,
+    ) -> None:
+        first = hash_password("correct horse battery staple")
+        second = hash_password(
+            "correct horse battery staple"
+        )
+
+        self.assertNotEqual(first, second)
+        self.assertTrue(
+            verify_password(
+                "correct horse battery staple",
+                first,
+            )
+        )
+        self.assertFalse(
+            verify_password("wrong password", first)
+        )
+        self.assertFalse(
+            verify_password(
+                "correct horse battery staple",
+                "not-a-valid-hash",
+            )
+        )
+
+    def test_provenance_requires_analyst_role(
+        self,
+    ) -> None:
+        researcher = ApiIdentity(
+            subject="researcher",
+            role=ApiRole.RESEARCHER,
+            token_hash="a" * 64,
+            active=True,
+        )
+        reviewer = ApiIdentity(
+            subject="reviewer",
+            role=ApiRole.REVIEWER,
+            token_hash="b" * 64,
+            active=True,
+        )
+
+        with self.assertRaises(PermissionError):
+            authorize_api(
+                researcher,
+                "view_provenance",
+            )
+
+        authorize_api(reviewer, "view_provenance")
 
     def test_reviewer_subject_is_tenant_scoped(self) -> None:
         self.assertNotEqual(
