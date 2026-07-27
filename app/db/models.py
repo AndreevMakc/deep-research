@@ -150,6 +150,11 @@ class ResearchRun(Base):
 
     question: Mapped[str] = mapped_column(Text, nullable=False)
 
+    title: Mapped[str] = mapped_column(
+        String(160),
+        nullable=False,
+    )
+
     status: Mapped[RunStatus] = mapped_column(
         Enum(RunStatus, name="run_status"),
         nullable=False,
@@ -172,6 +177,12 @@ class ResearchRun(Base):
     started_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
+    )
+
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
     )
 
     max_external_requests: Mapped[int] = mapped_column(
@@ -269,6 +280,61 @@ class ResearchRun(Base):
     work_items: Mapped[list["WorkItem"]] = relationship(
         back_populates="run",
         cascade="all, delete-orphan",
+    )
+
+    views: Mapped[list["ResearchRunView"]] = relationship(
+        back_populates="run",
+        cascade="all, delete-orphan",
+    )
+
+
+class ResearchRunView(Base):
+    __tablename__ = "research_run_views"
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "identity_id",
+            name="uq_research_run_view_run_identity",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey(
+            "research_runs.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    identity_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey(
+            "api_identities.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    result_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+
+    run: Mapped["ResearchRun"] = relationship(
+        back_populates="views"
     )
 
 

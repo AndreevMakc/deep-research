@@ -92,6 +92,7 @@ def main() -> None:
         assert "tenants" in tables
         assert "api_identities" in tables
         assert "browser_sessions" in tables
+        assert "research_run_views" in tables
         assert "work_items" in tables
         assert "idempotency_records" in tables
         assert "webhook_subscriptions" in tables
@@ -122,6 +123,8 @@ def main() -> None:
         assert {
             "started_at",
             "created_by_identity_id",
+            "title",
+            "archived_at",
             "max_external_requests",
             "max_sources",
             "max_claims",
@@ -221,6 +224,7 @@ def main() -> None:
                 "tenants",
                 "api_identities",
                 "browser_sessions",
+                "research_run_views",
                 "work_items",
                 "idempotency_records",
                 "webhook_subscriptions",

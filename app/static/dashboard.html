@@ -3,67 +3,344 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Deep Research Review</title>
+  <title>Исследования</title>
   <style>
-    :root { color-scheme: light; font-family: system-ui, sans-serif; }
-    body { max-width: 1100px; margin: 0 auto; padding: 24px; color: #183129; }
-    header, .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-    header h1 { flex: 1; }
-    input, button, select { padding: 9px 11px; font: inherit; }
-    input { min-width: 280px; }
+    :root {
+      color-scheme: light;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
+      --paper: #f4f1e9;
+      --surface: #fffdf8;
+      --ink: #18352b;
+      --muted: #64766f;
+      --line: #d9ded8;
+      --green: #176b4a;
+      --green-soft: #e3efe8;
+      --amber: #93661b;
+      --red: #9c3d36;
+      --shadow: 0 18px 55px rgba(31, 54, 44, .08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--paper);
+      color: var(--ink);
+    }
+    button, input, textarea { font: inherit; }
     button { cursor: pointer; }
-    main { display: grid; grid-template-columns: 300px 1fr; gap: 24px; margin-top: 24px; }
-    section { border: 1px solid #b7c7c0; border-radius: 10px; padding: 16px; }
-    .login { max-width: 430px; margin: 12vh auto 0; }
-    .login label { display: grid; gap: 5px; margin: 14px 0; }
-    .login input { min-width: 0; }
-    .run, .claim { border-bottom: 1px solid #dce5e1; padding: 12px 0; }
-    .run button { width: 100%; text-align: left; }
-    .muted { color: #5c7068; font-size: .9rem; }
-    .error { color: #a32a2a; white-space: pre-wrap; }
-    blockquote { margin-left: 0; border-left: 3px solid #4b8d72; padding-left: 12px; }
+    button:focus-visible, input:focus-visible, textarea:focus-visible {
+      outline: 3px solid rgba(23, 107, 74, .25);
+      outline-offset: 2px;
+    }
     [hidden] { display: none !important; }
-    @media (max-width: 760px) { main { grid-template-columns: 1fr; } }
+    .shell { width: min(1240px, calc(100% - 40px)); margin: 0 auto; }
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      padding: 24px 0 18px;
+      border-bottom: 1px solid rgba(24, 53, 43, .12);
+    }
+    .brand { flex: 1; }
+    .brand h1 {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(1.8rem, 4vw, 2.5rem);
+      font-weight: 500;
+      letter-spacing: -.04em;
+    }
+    .eyebrow {
+      margin: 0 0 4px;
+      color: var(--green);
+      font-size: .72rem;
+      font-weight: 750;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+    .identity { text-align: right; color: var(--muted); font-size: .88rem; }
+    .quiet-button, .secondary-button, .tab {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: transparent;
+      color: var(--ink);
+      padding: 9px 14px;
+    }
+    .quiet-button:hover, .secondary-button:hover { background: var(--surface); }
+    .login-card {
+      width: min(440px, calc(100% - 32px));
+      margin: 10vh auto;
+      padding: 34px;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .login-card h1 {
+      margin: 0 0 8px;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 2.4rem;
+      font-weight: 500;
+    }
+    label { display: grid; gap: 7px; margin: 16px 0; font-size: .88rem; }
+    input, textarea {
+      width: 100%;
+      border: 1px solid #bdc8c1;
+      border-radius: 11px;
+      background: #fff;
+      color: var(--ink);
+      padding: 11px 13px;
+    }
+    .primary-button {
+      border: 1px solid var(--green);
+      border-radius: 999px;
+      background: var(--green);
+      color: #fff;
+      padding: 11px 18px;
+      font-weight: 700;
+    }
+    .primary-button:hover { background: #0f593d; }
+    .primary-button:disabled { cursor: wait; opacity: .65; }
+    .composer {
+      width: min(860px, 100%);
+      margin: 56px auto 42px;
+      text-align: center;
+    }
+    .composer h2 {
+      margin: 0 0 18px;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(2rem, 5vw, 3.5rem);
+      font-weight: 500;
+      letter-spacing: -.045em;
+    }
+    .question-box {
+      padding: 10px;
+      border: 1px solid #b9c6bf;
+      border-radius: 20px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      text-align: left;
+    }
+    .question-box textarea {
+      min-height: 110px;
+      resize: vertical;
+      border: 0;
+      background: transparent;
+      font-size: 1.05rem;
+      line-height: 1.55;
+    }
+    .question-box textarea:focus-visible { outline: 0; }
+    .composer-actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 5px;
+    }
+    .material-note { color: var(--muted); font-size: .78rem; }
+    .examples {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 15px;
+    }
+    .example {
+      border: 0;
+      border-bottom: 1px solid #9bb2a7;
+      background: transparent;
+      color: var(--muted);
+      padding: 6px 2px;
+      font-size: .84rem;
+    }
+    .workspace-grid {
+      display: grid;
+      grid-template-columns: minmax(330px, .9fr) minmax(0, 1.4fr);
+      gap: 24px;
+      align-items: start;
+      padding-bottom: 60px;
+    }
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--surface);
+      box-shadow: 0 10px 35px rgba(31, 54, 44, .05);
+    }
+    .panel-heading { padding: 20px 20px 0; }
+    .panel-heading h2 {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 1.55rem;
+      font-weight: 500;
+    }
+    .tabs {
+      display: flex;
+      gap: 6px;
+      padding: 16px 18px;
+      overflow-x: auto;
+    }
+    .tab { white-space: nowrap; padding: 7px 11px; font-size: .82rem; }
+    .tab[aria-selected="true"] {
+      border-color: var(--green);
+      background: var(--green-soft);
+      color: var(--green);
+    }
+    .run-list { border-top: 1px solid var(--line); }
+    .run-card {
+      position: relative;
+      width: 100%;
+      display: grid;
+      gap: 8px;
+      border: 0;
+      border-bottom: 1px solid var(--line);
+      background: transparent;
+      color: inherit;
+      padding: 17px 20px;
+      text-align: left;
+    }
+    .run-card:last-child { border-bottom: 0; }
+    .run-card:hover, .run-card[aria-current="true"] { background: #f5f8f4; }
+    .run-title { padding-right: 16px; font-weight: 720; line-height: 1.35; }
+    .run-meta { display: flex; gap: 8px; flex-wrap: wrap; color: var(--muted); font-size: .78rem; }
+    .unread-dot {
+      position: absolute;
+      top: 21px;
+      right: 18px;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+    }
+    .status {
+      width: fit-content;
+      border-radius: 999px;
+      background: var(--green-soft);
+      color: var(--green);
+      padding: 3px 8px;
+      font-size: .72rem;
+      font-weight: 700;
+    }
+    .status.failed { background: #f6e7e4; color: var(--red); }
+    .status.active { background: #f5ecd8; color: var(--amber); }
+    .empty {
+      padding: 34px 22px;
+      color: var(--muted);
+      text-align: center;
+      line-height: 1.5;
+    }
+    .details { min-height: 390px; padding: 28px; }
+    .details h2 {
+      margin: 5px 0 12px;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(1.8rem, 4vw, 2.7rem);
+      font-weight: 500;
+      letter-spacing: -.035em;
+    }
+    .details-question {
+      margin: 22px 0;
+      padding: 18px 0;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      line-height: 1.65;
+    }
+    .detail-actions { display: flex; gap: 9px; flex-wrap: wrap; margin-top: 22px; }
+    .title-form { display: flex; align-items: end; gap: 8px; }
+    .title-form label { flex: 1; margin: 0; }
+    .provenance { margin-top: 26px; border-top: 1px solid var(--line); padding-top: 20px; }
+    .claim { padding: 13px 0; border-bottom: 1px solid var(--line); }
+    .claim-actions { display: flex; gap: 7px; margin-top: 8px; }
+    .muted { color: var(--muted); }
+    .small { font-size: .82rem; }
+    .error { color: var(--red); white-space: pre-wrap; }
+    .notice { min-height: 24px; margin: 12px 0; text-align: center; }
+    @media (max-width: 820px) {
+      .shell { width: min(100% - 24px, 680px); }
+      .topbar { align-items: flex-start; }
+      .identity { display: none; }
+      .composer { margin: 36px auto 28px; }
+      .workspace-grid { grid-template-columns: 1fr; }
+      .details { min-height: 0; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; }
+    }
   </style>
 </head>
 <body>
-  <section id="login-view" class="login">
-    <h1>Deep Research Review</h1>
-    <p class="muted">Войдите в общее пространство исследований.</p>
+  <section id="login-view" class="login-card">
+    <p class="eyebrow">Общее пространство</p>
+    <h1>Исследования</h1>
+    <p class="muted">Войдите, чтобы продолжить работу с проверяемыми отчётами.</p>
     <form id="login-form">
-      <label>
-        Пространство
-        <input id="tenant" name="tenant" autocomplete="organization" required>
+      <label>Пространство
+        <input id="tenant" autocomplete="organization" required>
       </label>
-      <label>
-        Логин
-        <input id="login" name="login" autocomplete="username" required>
+      <label>Логин
+        <input id="login" autocomplete="username" required>
       </label>
-      <label>
-        Пароль
-        <input id="password" name="password" type="password"
-               autocomplete="current-password" minlength="12" required>
+      <label>Пароль
+        <input id="password" type="password" autocomplete="current-password"
+               minlength="12" required>
       </label>
-      <button type="submit">Войти</button>
+      <button class="primary-button" type="submit">Войти</button>
     </form>
     <p id="login-message" class="error" role="alert"></p>
   </section>
 
-  <div id="workspace" hidden>
-    <header>
-      <h1>Deep Research Review</h1>
-      <span id="identity" class="muted"></span>
-      <button id="logout" type="button">Выйти</button>
+  <div id="workspace" class="shell" hidden>
+    <header class="topbar">
+      <div class="brand">
+        <p class="eyebrow">Deep Research</p>
+        <h1>Исследования</h1>
+      </div>
+      <div id="identity" class="identity"></div>
+      <button id="logout" class="quiet-button" type="button">Выйти</button>
     </header>
-    <p id="message" class="error" role="alert"></p>
-    <main>
-      <section>
-        <h2>Исследования</h2>
-        <div id="runs"></div>
+
+    <section id="composer" class="composer">
+      <p class="eyebrow">Новое исследование</p>
+      <h2>Что вы хотите исследовать?</h2>
+      <form id="research-form" class="question-box">
+        <textarea id="question" minlength="3" maxlength="10000"
+          placeholder="Сформулируйте вопрос, решение или гипотезу…"
+          aria-label="Вопрос исследования" required></textarea>
+        <div class="composer-actions">
+          <span class="material-note">Материалы подключим в следующем этапе</span>
+          <button id="start-research" class="primary-button" type="submit">
+            Начать исследование
+          </button>
+        </div>
+      </form>
+      <div class="examples" aria-label="Примеры вопросов">
+        <button class="example" type="button"
+          data-question="Какие альтернативы этому решению существуют и чем они отличаются?">
+          Сравнить альтернативы
+        </button>
+        <button class="example" type="button"
+          data-question="Какие доказательства подтверждают эту гипотезу, а какие ей противоречат?">
+          Проверить гипотезу
+        </button>
+        <button class="example" type="button"
+          data-question="Какие ключевые изменения произошли в этой области за последний год?">
+          Изучить изменения
+        </button>
+      </div>
+      <p id="message" class="notice error" role="alert"></p>
+    </section>
+
+    <main class="workspace-grid">
+      <section class="panel" aria-label="Библиотека исследований">
+        <div class="panel-heading">
+          <p class="eyebrow">Общее пространство</p>
+          <h2>Библиотека</h2>
+        </div>
+        <div id="tabs" class="tabs" role="tablist"></div>
+        <div id="runs" class="run-list"></div>
       </section>
-      <section>
-        <h2 id="title">Provenance</h2>
-        <div id="details">Выберите исследование.</div>
+
+      <section id="details" class="panel details" aria-live="polite">
+        <p class="eyebrow">Исследование</p>
+        <h2>Выберите отчёт</h2>
+        <p class="muted">Здесь появятся вопрос, статус и доступные действия.</p>
       </section>
     </main>
   </div>
@@ -71,12 +348,33 @@
   <script>
     const loginView = document.querySelector("#login-view");
     const workspace = document.querySelector("#workspace");
+    const composer = document.querySelector("#composer");
     const loginMessage = document.querySelector("#login-message");
     const messageNode = document.querySelector("#message");
     const runsNode = document.querySelector("#runs");
+    const tabsNode = document.querySelector("#tabs");
     const detailsNode = document.querySelector("#details");
+    const questionNode = document.querySelector("#question");
     let currentIdentity = null;
     let csrfCookieName = "dr_csrf";
+    let allRuns = [];
+    let selectedRunId = null;
+    let selectedGroup = "active";
+
+    const groups = [
+      ["active", "Активные"],
+      ["ready", "Готовые"],
+      ["archived", "Архив"]
+    ];
+    const statuses = {
+      created: "В очереди",
+      running: "Выполняется",
+      completed: "Готово",
+      completed_with_errors: "Готово с ограничениями",
+      failed: "Ошибка",
+      cancel_requested: "Останавливается",
+      cancelled: "Остановлено"
+    };
 
     function element(tag, text, className) {
       const node = document.createElement(tag);
@@ -87,7 +385,9 @@
 
     function cookie(name) {
       const prefix = `${encodeURIComponent(name)}=`;
-      const item = document.cookie.split("; ").find(value => value.startsWith(prefix));
+      const item = document.cookie
+        .split("; ")
+        .find(value => value.startsWith(prefix));
       return item ? decodeURIComponent(item.slice(prefix.length)) : "";
     }
 
@@ -103,8 +403,25 @@
       };
       const response = await fetch(path, {...options, method, headers});
       const data = response.status === 204 ? null : await response.json();
-      if (!response.ok) throw new Error(data?.detail || JSON.stringify(data));
+      if (!response.ok) {
+        throw new Error(data?.detail || "Не удалось выполнить запрос");
+      }
       return data;
+    }
+
+    function formatDate(value) {
+      return new Intl.DateTimeFormat("ru", {
+        day: "numeric",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit"
+      }).format(new Date(value));
+    }
+
+    function statusClass(run) {
+      if (run.group === "active") return "status active";
+      if (run.status === "failed") return "status failed";
+      return "status";
     }
 
     function showLogin() {
@@ -119,106 +436,248 @@
       csrfCookieName = identity.csrf_cookie_name;
       loginView.hidden = true;
       workspace.hidden = false;
+      composer.hidden = !identity.capabilities.create_run;
       document.querySelector("#identity").textContent =
         `${identity.login} · ${identity.role}`;
       await loadRuns();
     }
 
-    async function mutate(path, body) {
-      const reason = prompt("Причина решения:");
-      if (!reason) return;
-      await request(path, {
-        method: "POST",
-        idempotent: true,
-        body: JSON.stringify({...body, reason})
-      });
-      messageNode.textContent = "Решение сохранено.";
+    async function loadRuns({preserveSelection = true} = {}) {
+      messageNode.textContent = "";
+      allRuns = await request("/api/v1/runs");
+      if (!preserveSelection) selectedRunId = null;
+      const activeCount = allRuns.filter(run => run.group === "active").length;
+      if (!allRuns.some(run => run.group === selectedGroup)) {
+        selectedGroup = activeCount ? "active" :
+          (allRuns.some(run => run.group === "ready") ? "ready" : "archived");
+      }
+      renderLibrary();
     }
 
-    async function loadRuns() {
-      messageNode.textContent = "";
+    function renderLibrary() {
+      tabsNode.replaceChildren();
       runsNode.replaceChildren();
-      const runs = await request("/api/v1/runs");
-      for (const run of runs) {
-        const wrapper = element("div", undefined, "run");
-        const button = element("button", run.question);
-        button.type = "button";
-        button.addEventListener("click", () => loadRun(run.id));
-        wrapper.append(
-          button,
-          element(
-            "div",
-            `${run.status} · ${run.author || "автор не указан"}`,
-            "muted"
-          )
-        );
-        runsNode.append(wrapper);
-      }
-      if (!runs.length) {
-        runsNode.append(element("p", "Исследований пока нет.", "muted"));
-      }
-    }
 
-    async function loadRun(runId) {
-      messageNode.textContent = "";
-      detailsNode.replaceChildren();
-      if (!currentIdentity.capabilities.view_provenance) {
-        detailsNode.append(
-          element(
-            "p",
-            "Технический provenance доступен только аналитику или администратору.",
-            "muted"
-          )
-        );
+      for (const [key, label] of groups) {
+        const count = allRuns.filter(run => run.group === key).length;
+        const tab = element("button", `${label} · ${count}`, "tab");
+        tab.type = "button";
+        tab.role = "tab";
+        tab.setAttribute("aria-selected", String(selectedGroup === key));
+        tab.addEventListener("click", () => {
+          selectedGroup = key;
+          renderLibrary();
+        });
+        tabsNode.append(tab);
+      }
+
+      const visible = allRuns.filter(run => run.group === selectedGroup);
+      if (!visible.length) {
+        const messages = {
+          active: "Нет активных исследований. Начните с вопроса выше.",
+          ready: "Готовые результаты появятся здесь.",
+          archived: "Архив пока пуст."
+        };
+        runsNode.append(element("div", messages[selectedGroup], "empty"));
         return;
       }
-      const data = await request(`/api/v1/runs/${runId}/provenance`);
-      document.querySelector("#title").textContent = `Run ${runId}`;
-      for (const claim of data.claims) {
-        const card = element("div", undefined, "claim");
+
+      for (const run of visible) {
+        const card = element("button", undefined, "run-card");
+        card.type = "button";
+        card.setAttribute("aria-current", String(run.id === selectedRunId));
+        card.append(element("span", run.title, "run-title"));
         card.append(
-          element("strong", claim.text),
-          element("div", `${claim.status} / ${claim.review_status}`, "muted")
+          element("span", statuses[run.status] || run.status, statusClass(run))
         );
-        if (currentIdentity.capabilities.review_claim) {
-          const actions = element("div", undefined, "row");
-          for (const decision of ["approve", "reject", "research"]) {
-            const button = element("button", decision);
-            button.type = "button";
-            button.addEventListener("click", async () => {
-              await mutate(`/api/v1/claims/${claim.id}/review`, {decision});
-              await loadRun(runId);
-            });
-            actions.append(button);
-          }
-          card.append(actions);
+        const meta = element("span", undefined, "run-meta");
+        meta.append(
+          element("span", run.author || "автор не указан"),
+          element("span", formatDate(run.updated_at)),
+          element("span", `${run.version_count} верс.`)
+        );
+        card.append(meta);
+        if (run.unread_result) {
+          const dot = element("span", undefined, "unread-dot");
+          dot.title = "Новый результат";
+          card.append(dot);
         }
-        detailsNode.append(card);
-      }
-      if (data.report) {
-        const report = element("section");
-        report.append(element("h3", `Report: ${data.report.review_status}`));
-        if (currentIdentity.capabilities.review_report) {
-          const approve = element("button", "approve report");
-          approve.type = "button";
-          approve.addEventListener("click", async () => {
-            await mutate(`/api/v1/runs/${runId}/review`, {decision: "approve"});
-            await loadRun(runId);
-          });
-          report.append(approve);
-        }
-        if (currentIdentity.capabilities.publish) {
-          const publish = element("button", "publish");
-          publish.type = "button";
-          publish.addEventListener("click", async () => {
-            await mutate(`/api/v1/runs/${runId}/publish`, {});
-            await loadRun(runId);
-          });
-          report.append(publish);
-        }
-        detailsNode.append(report);
+        card.addEventListener("click", () => openRun(run.id));
+        runsNode.append(card);
       }
     }
+
+    async function openRun(runId) {
+      selectedRunId = runId;
+      renderLibrary();
+      try {
+        const run = await request(`/api/v1/runs/${runId}`);
+        renderDetails(run);
+        if (run.unread_result) {
+          await request(`/api/v1/runs/${runId}/read`, {method: "POST"});
+          const cached = allRuns.find(item => item.id === runId);
+          if (cached) cached.unread_result = false;
+          renderLibrary();
+        }
+      } catch (error) {
+        detailsNode.replaceChildren(
+          element("p", error.message, "error")
+        );
+      }
+    }
+
+    function renderDetails(run) {
+      detailsNode.replaceChildren();
+      detailsNode.append(
+        element("p", "Исследование", "eyebrow"),
+        element("h2", run.title),
+        element("span", statuses[run.status] || run.status, statusClass(run))
+      );
+      const meta = element("p", undefined, "muted small");
+      meta.textContent =
+        `${run.author || "автор не указан"} · обновлено ${formatDate(run.updated_at)} · ` +
+        `${run.version_count} верс.`;
+      detailsNode.append(meta);
+      const question = element("div", run.question, "details-question");
+      detailsNode.append(question);
+
+      if (run.can_manage) {
+        const form = element("form", undefined, "title-form");
+        const label = element("label", "Название");
+        const input = element("input");
+        input.value = run.title;
+        input.minLength = 3;
+        input.maxLength = 160;
+        label.append(input);
+        const save = element("button", "Сохранить", "secondary-button");
+        save.type = "submit";
+        form.append(label, save);
+        form.addEventListener("submit", async event => {
+          event.preventDefault();
+          try {
+            await request(`/api/v1/runs/${run.id}`, {
+              method: "PATCH",
+              body: JSON.stringify({title: input.value})
+            });
+            await loadRuns();
+            await openRun(run.id);
+          } catch (error) {
+            messageNode.textContent = error.message;
+          }
+        });
+        detailsNode.append(form);
+
+        const actions = element("div", undefined, "detail-actions");
+        const archived = run.group === "archived";
+        const archive = element(
+          "button",
+          archived ? "Вернуть из архива" : "В архив",
+          "quiet-button"
+        );
+        archive.type = "button";
+        archive.addEventListener("click", async () => {
+          try {
+            await request(`/api/v1/runs/${run.id}`, {
+              method: "PATCH",
+              body: JSON.stringify({archived: !archived})
+            });
+            selectedRunId = null;
+            selectedGroup = archived ? "ready" : "archived";
+            detailsNode.replaceChildren(
+              element("p", "Состояние библиотеки обновлено.", "muted")
+            );
+            await loadRuns();
+          } catch (error) {
+            messageNode.textContent = error.message;
+          }
+        });
+        actions.append(archive);
+        detailsNode.append(actions);
+      }
+
+      if (currentIdentity.capabilities.view_provenance) {
+        const provenance = element("button", "Открыть доказательства", "quiet-button");
+        provenance.type = "button";
+        provenance.addEventListener("click", () => loadProvenance(run.id));
+        detailsNode.append(element("div", undefined, "detail-actions"));
+        detailsNode.lastElementChild.append(provenance);
+      }
+    }
+
+    async function loadProvenance(runId) {
+      try {
+        const data = await request(`/api/v1/runs/${runId}/provenance`);
+        let container = detailsNode.querySelector(".provenance");
+        if (!container) {
+          container = element("div", undefined, "provenance");
+          detailsNode.append(container);
+        }
+        container.replaceChildren(element("h3", "Доказательства"));
+        if (!data.claims.length) {
+          container.append(element("p", "Claims пока не сформированы.", "muted"));
+        }
+        for (const claim of data.claims) {
+          const card = element("div", undefined, "claim");
+          card.append(
+            element("strong", claim.text),
+            element("div", `${claim.status} · ${claim.review_status}`, "muted small")
+          );
+          if (currentIdentity.capabilities.review_claim) {
+            const actions = element("div", undefined, "claim-actions");
+            for (const decision of ["approve", "reject", "research"]) {
+              const button = element("button", decision, "quiet-button");
+              button.type = "button";
+              button.addEventListener("click", async () => {
+                const reason = prompt("Причина решения:");
+                if (!reason) return;
+                await request(`/api/v1/claims/${claim.id}/review`, {
+                  method: "POST",
+                  idempotent: true,
+                  body: JSON.stringify({decision, reason})
+                });
+                await loadProvenance(runId);
+              });
+              actions.append(button);
+            }
+            card.append(actions);
+          }
+          container.append(card);
+        }
+      } catch (error) {
+        messageNode.textContent = error.message;
+      }
+    }
+
+    document.querySelectorAll(".example").forEach(button => {
+      button.addEventListener("click", () => {
+        questionNode.value = button.dataset.question;
+        questionNode.focus();
+      });
+    });
+
+    document.querySelector("#research-form").addEventListener("submit", async event => {
+      event.preventDefault();
+      const submit = document.querySelector("#start-research");
+      messageNode.textContent = "";
+      submit.disabled = true;
+      submit.textContent = "Запускаем…";
+      try {
+        const created = await request("/api/v1/runs", {
+          method: "POST",
+          idempotent: true,
+          body: JSON.stringify({question: questionNode.value})
+        });
+        questionNode.value = "";
+        selectedGroup = "active";
+        await loadRuns();
+        await openRun(created.run_id);
+      } catch (error) {
+        messageNode.textContent = error.message;
+      } finally {
+        submit.disabled = false;
+        submit.textContent = "Начать исследование";
+      }
+    });
 
     document.querySelector("#login-form").addEventListener("submit", async event => {
       event.preventDefault();
@@ -245,6 +704,16 @@
         showLogin();
       }
     });
+
+    setInterval(() => {
+      if (
+        currentIdentity &&
+        !document.hidden &&
+        allRuns.some(run => run.group === "active")
+      ) {
+        loadRuns().catch(error => messageNode.textContent = error.message);
+      }
+    }, 15000);
 
     request("/api/v1/auth/session")
       .then(showWorkspace)

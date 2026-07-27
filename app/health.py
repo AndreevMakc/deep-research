@@ -34,6 +34,7 @@ REQUIRED_TABLES = {
     "tenants",
     "api_identities",
     "browser_sessions",
+    "research_run_views",
     "work_items",
     "idempotency_records",
     "webhook_subscriptions",

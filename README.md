@@ -339,6 +339,11 @@ curl -X POST http://localhost:8000/api/v1/runs \
 - liveness — `http://localhost:8000/health/live`;
 - readiness — `http://localhost:8000/health/ready`.
 
+Dashboard показывает общую библиотеку активных, готовых и архивных
+исследований. Из него можно запустить run, изменить автоматически созданный
+заголовок, перенести собственное исследование в архив и увидеть новый
+результат; unread-состояние хранится отдельно для каждого пользователя.
+
 Webhook delivery подписывается `X-Deep-Research-Signature` в формате
 `sha256=<HMAC>` и повторяется с exponential backoff.
 
