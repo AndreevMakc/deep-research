@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -36,6 +37,14 @@ class Settings(BaseSettings):
     slo_max_retry_rate: float = 0.10
     telemetry_retention_days: int = 30
     log_level: str = "INFO"
+    session_cookie_name: str = "dr_session"
+    csrf_cookie_name: str = "dr_csrf"
+    session_lifetime_days: int = Field(
+        default=30,
+        ge=1,
+        le=365,
+    )
+    session_cookie_secure: bool = True
 
     model_config = SettingsConfigDict(
         env_file=".env",

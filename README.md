@@ -292,18 +292,34 @@ python -m app.ops export-obsidian <run-id> /path/to/vault \
 
 ## Multi-user API
 
-FastAPI-контур изолирует данные по tenant, хранит hashed bearer tokens и
-требует `Idempotency-Key` для mutating endpoints. Durable PostgreSQL queue
+FastAPI-контур изолирует данные по tenant и поддерживает два способа входа:
+hashed bearer tokens для программных клиентов и серверные cookie-сессии для
+пользовательского интерфейса. Пароли хешируются через `scrypt`, cookie имеют
+`HttpOnly`, `SameSite=Strict` и configurable `Secure`, а mutating запросы из
+браузера дополнительно проверяют CSRF token. Durable PostgreSQL queue
 поддерживает leases, heartbeats, cancellation и повторный захват потерянных
 задач.
 
 ```bash
 python -m app.tenants create acme "Acme Research"
-python -m app.tenants issue-token acme admin --role admin
+# Первый пользователь tenant обязан быть admin. Пароль читается без echo.
+python -m app.tenants create-user acme admin --role admin
 
+# Только для локального HTTP. В production оставьте true.
+export SESSION_COOKIE_SECURE=false
 uvicorn app.api:app --host 0.0.0.0 --port 8000
 python -m app.worker
 python -m app.webhooks
+```
+
+Если сначала нужен программный admin, выпустите bearer token вместо
+`create-user`, а затем создайте отдельный браузерный аккаунт с
+`--actor-token <token>`:
+
+```bash
+python -m app.tenants issue-token acme automation --role admin
+python -m app.tenants create-user acme admin --role admin \
+  --actor-token <token>
 ```
 
 Создать idempotent run:
@@ -319,7 +335,7 @@ curl -X POST http://localhost:8000/api/v1/runs \
 После запуска доступны:
 
 - OpenAPI — `http://localhost:8000/docs`;
-- review dashboard — `http://localhost:8000/dashboard`;
+- dashboard с обычной формой входа — `http://localhost:8000/dashboard`;
 - liveness — `http://localhost:8000/health/live`;
 - readiness — `http://localhost:8000/health/ready`.
 
@@ -404,6 +420,10 @@ image без публикации и деплоя.
 | `SLO_MAX_RETRY_RATE` | Максимальная доля retries | `0.10` |
 | `TELEMETRY_RETENTION_DAYS` | Retention operational events | `30` |
 | `LOG_LEVEL` | Уровень логирования | `INFO` |
+| `SESSION_COOKIE_NAME` | Имя HttpOnly session cookie | `dr_session` |
+| `CSRF_COOKIE_NAME` | Имя CSRF cookie | `dr_csrf` |
+| `SESSION_LIFETIME_DAYS` | Срок сессии доверенного устройства | `30` |
+| `SESSION_COOKIE_SECURE` | Отправлять session cookies только по HTTPS | `true` |
 
 </details>
 
