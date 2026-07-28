@@ -95,6 +95,7 @@ Pull request должен:
 ruff check .
 python -m compileall -q app tests migrations
 python -m pip check
+python -m playwright install chromium
 docker compose config -q
 python -m app.db.migrate
 alembic check
@@ -116,6 +117,7 @@ CI проверяет:
 - валидность Docker Compose;
 - применение миграций и отсутствие migration drift;
 - полный набор unit, integration и smoke-тестов;
+- browser-level end-to-end тесты в Chromium;
 - readiness и SLO;
 - offline quality thresholds;
 - сборку Docker image без публикации.
@@ -139,4 +141,3 @@ CI не должен:
 Сборка локального Docker image в CI является проверкой Dockerfile и не
 публикует артефакт. Любой будущий deployment workflow требует отдельного
 решения и pull request.
-

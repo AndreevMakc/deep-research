@@ -1,0 +1,363 @@
+from __future__ import annotations
+
+import json
+import os
+import socket
+import subprocess
+import sys
+import time
+import unittest
+import urllib.request
+import uuid
+from pathlib import Path
+
+from playwright.sync_api import (
+    Browser,
+    BrowserContext,
+    Page,
+    Playwright,
+    expect,
+    sync_playwright,
+)
+from sqlalchemy import func, select
+
+from app.db.models import (
+    ApiRole,
+    ResearchDraft,
+    ResearchRun,
+    ReviewerIdentity,
+    Tenant,
+    WorkItem,
+)
+from app.db.session import SessionFactory
+from app.multitenancy import (
+    create_password_identity,
+    create_tenant,
+)
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _available_port() -> int:
+    with socket.socket() as server:
+        server.bind(("127.0.0.1", 0))
+        return int(server.getsockname()[1])
+
+
+class DashboardBrowserTests(unittest.TestCase):
+    server: subprocess.Popen
+    playwright: Playwright
+    browser: Browser
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.port = _available_port()
+        cls.base_url = f"http://127.0.0.1:{cls.port}"
+        environment = os.environ.copy()
+        environment["SESSION_COOKIE_SECURE"] = "false"
+        cls.server = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "uvicorn",
+                "app.api:app",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(cls.port),
+                "--log-level",
+                "warning",
+            ],
+            cwd=PROJECT_ROOT,
+            env=environment,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        try:
+            cls._wait_for_server()
+            cls.playwright = sync_playwright().start()
+            cls.browser = cls.playwright.chromium.launch(
+                headless=True
+            )
+        except Exception:
+            if hasattr(cls, "playwright"):
+                cls.playwright.stop()
+
+            cls._stop_server()
+            raise
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        if hasattr(cls, "browser"):
+            cls.browser.close()
+
+        if hasattr(cls, "playwright"):
+            cls.playwright.stop()
+
+        cls._stop_server()
+
+    @classmethod
+    def _wait_for_server(cls) -> None:
+        deadline = time.monotonic() + 15
+        last_error: Exception | None = None
+
+        while time.monotonic() < deadline:
+            if cls.server.poll() is not None:
+                raise RuntimeError(
+                    "Browser test server exited before startup"
+                )
+
+            try:
+                with urllib.request.urlopen(
+                    f"{cls.base_url}/health/live",
+                    timeout=1,
+                ) as response:
+                    if response.status == 200:
+                        return
+            except Exception as error:
+                last_error = error
+                time.sleep(0.1)
+
+        raise RuntimeError(
+            "Browser test server did not become ready"
+        ) from last_error
+
+    @classmethod
+    def _stop_server(cls) -> None:
+        if not hasattr(cls, "server"):
+            return
+
+        if cls.server.poll() is None:
+            cls.server.terminate()
+
+            try:
+                cls.server.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                cls.server.kill()
+                cls.server.wait(timeout=5)
+
+    def setUp(self) -> None:
+        suffix = uuid.uuid4().hex[:10]
+        self.slug = f"browser-{suffix}"
+        self.login = "admin"
+        self.password = "Browser admin password 123!"
+
+        with SessionFactory() as session:
+            tenant = create_tenant(
+                session,
+                slug=self.slug,
+                name="Browser end-to-end test",
+            )
+            identity = create_password_identity(
+                session,
+                tenant=tenant,
+                subject=self.login,
+                role=ApiRole.ADMIN,
+                password=self.password,
+            )
+            self.tenant_id = tenant.id
+            self.identity_id = identity.id
+
+        self.context: BrowserContext = (
+            self.browser.new_context()
+        )
+        self.page: Page = self.context.new_page()
+        self.page.set_default_timeout(10_000)
+
+    def tearDown(self) -> None:
+        self.context.close()
+
+        with SessionFactory() as session:
+            tenant = session.get(Tenant, self.tenant_id)
+
+            if tenant is not None:
+                session.delete(tenant)
+
+            reviewers = list(
+                session.scalars(
+                    select(ReviewerIdentity).where(
+                        ReviewerIdentity.subject.like(
+                            f"{self.slug}:%"
+                        )
+                    )
+                ).all()
+            )
+
+            for reviewer in reviewers:
+                session.delete(reviewer)
+
+            session.commit()
+
+    def _login(self) -> None:
+        self.page.goto(
+            f"{self.base_url}/dashboard",
+            wait_until="domcontentloaded",
+        )
+        self.page.locator("#tenant").fill(self.slug)
+        self.page.locator("#login").fill(self.login)
+        self.page.locator("#password").fill(self.password)
+        self.page.get_by_role(
+            "button",
+            name="Войти",
+        ).click()
+        expect(
+            self.page.locator("#workspace")
+        ).to_be_visible()
+
+    def test_login_empty_library_draft_refresh_and_run(
+        self,
+    ) -> None:
+        question = (
+            "Какие факторы влияют на выбор платформы?"
+        )
+        self._login()
+        expect(self.page.locator("#runs")).to_contain_text(
+            "Нет активных исследований"
+        )
+
+        self.page.locator("#question").fill(question)
+        self.page.get_by_role(
+            "button",
+            name="Продолжить",
+        ).click()
+        expect(
+            self.page.locator("#draft-card")
+        ).to_be_visible()
+        expect(
+            self.page.locator("#draft-question")
+        ).to_have_text(question)
+        expect(
+            self.page.locator("#draft-scope")
+        ).to_contain_text(question)
+
+        with SessionFactory() as session:
+            self.assertEqual(
+                session.scalar(
+                    select(func.count(ResearchDraft.id)).where(
+                        ResearchDraft.tenant_id
+                        == self.tenant_id
+                    )
+                ),
+                1,
+            )
+            self.assertEqual(
+                session.scalar(
+                    select(func.count(ResearchRun.id)).where(
+                        ResearchRun.tenant_id
+                        == self.tenant_id
+                    )
+                ),
+                0,
+            )
+
+        self.page.reload(wait_until="domcontentloaded")
+        expect(
+            self.page.locator("#login-view")
+        ).to_be_hidden()
+        expect(
+            self.page.locator("#draft-card")
+        ).to_be_visible()
+        expect(
+            self.page.locator("#draft-question")
+        ).to_have_text(question)
+
+        self.page.get_by_role(
+            "button",
+            name="Начать исследование",
+        ).click()
+        run_card = self.page.locator(".run-card").filter(
+            has_text="Какие факторы влияют на выбор платформы"
+        )
+        expect(run_card).to_have_count(1)
+        expect(run_card).to_contain_text("В очереди")
+        expect(self.page.locator("#details")).to_contain_text(
+            question
+        )
+
+        with SessionFactory() as session:
+            self.assertEqual(
+                session.scalar(
+                    select(func.count(ResearchRun.id)).where(
+                        ResearchRun.tenant_id
+                        == self.tenant_id
+                    )
+                ),
+                1,
+            )
+            self.assertEqual(
+                session.scalar(
+                    select(func.count(WorkItem.id)).where(
+                        WorkItem.tenant_id == self.tenant_id
+                    )
+                ),
+                1,
+            )
+
+    def test_draft_error_is_visible_without_creating_run(
+        self,
+    ) -> None:
+        self._login()
+
+        def fail_draft(route, request) -> None:
+            if request.method == "POST":
+                route.fulfill(
+                    status=503,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {
+                            "detail": (
+                                "Исследование временно недоступно"
+                            )
+                        },
+                        ensure_ascii=False,
+                    ),
+                )
+            else:
+                route.continue_()
+
+        self.page.route(
+            "**/api/v1/research-drafts",
+            fail_draft,
+        )
+        self.page.locator("#question").fill(
+            "Какие риски нужно проверить?"
+        )
+        self.page.get_by_role(
+            "button",
+            name="Продолжить",
+        ).click()
+        expect(self.page.locator("#message")).to_have_text(
+            "Исследование временно недоступно"
+        )
+        expect(
+            self.page.locator("#research-form")
+        ).to_be_visible()
+        expect(
+            self.page.locator("#draft-card")
+        ).to_be_hidden()
+
+        with SessionFactory() as session:
+            self.assertEqual(
+                session.scalar(
+                    select(func.count(ResearchDraft.id)).where(
+                        ResearchDraft.tenant_id
+                        == self.tenant_id
+                    )
+                ),
+                0,
+            )
+            self.assertEqual(
+                session.scalar(
+                    select(func.count(ResearchRun.id)).where(
+                        ResearchRun.tenant_id
+                        == self.tenant_id
+                    )
+                ),
+                0,
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()
