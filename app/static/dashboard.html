@@ -567,7 +567,9 @@
       const activeCount = allRuns.filter(run => run.group === "active").length;
       if (!allRuns.some(run => run.group === selectedGroup)) {
         selectedGroup = activeCount ? "active" :
-          (allRuns.some(run => run.group === "ready") ? "ready" : "archived");
+          (allRuns.some(run => run.group === "ready") ? "ready" :
+            (allRuns.some(run => run.group === "archived")
+              ? "archived" : "active"));
       }
       renderLibrary();
     }

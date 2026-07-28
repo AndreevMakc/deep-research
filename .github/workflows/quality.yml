@@ -63,6 +63,9 @@ jobs:
       - name: Validate installed dependencies
         run: python -m pip check
 
+      - name: Install browser for end-to-end tests
+        run: python -m playwright install --with-deps chromium
+
       - name: Validate Python syntax
         run: python -m compileall -q app tests migrations
 
