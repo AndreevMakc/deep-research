@@ -152,6 +152,46 @@
       padding: 6px 2px;
       font-size: .84rem;
     }
+    .draft-card {
+      border: 1px solid #b9c6bf;
+      border-radius: 20px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      padding: 24px;
+      text-align: left;
+    }
+    .draft-card h3 {
+      margin: 4px 0 18px;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 1.65rem;
+      font-weight: 500;
+    }
+    .draft-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .draft-field {
+      border-top: 1px solid var(--line);
+      padding-top: 12px;
+      line-height: 1.5;
+    }
+    .draft-field.wide { grid-column: 1 / -1; }
+    .draft-field strong {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--muted);
+      font-size: .75rem;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .draft-field ul { margin: 6px 0 0; padding-left: 20px; }
+    .draft-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 9px;
+      margin-top: 22px;
+    }
     .workspace-grid {
       display: grid;
       grid-template-columns: minmax(330px, .9fr) minmax(0, 1.4fr);
@@ -258,6 +298,8 @@
       .identity { display: none; }
       .composer { margin: 36px auto 28px; }
       .workspace-grid { grid-template-columns: 1fr; }
+      .draft-grid { grid-template-columns: 1fr; }
+      .draft-field.wide { grid-column: auto; }
       .details { min-height: 0; }
     }
     @media (prefers-reduced-motion: reduce) {
@@ -305,8 +347,8 @@
           aria-label="Вопрос исследования" required></textarea>
         <div class="composer-actions">
           <span class="material-note">Материалы подключим в следующем этапе</span>
-          <button id="start-research" class="primary-button" type="submit">
-            Начать исследование
+          <button id="prepare-research" class="primary-button" type="submit">
+            Продолжить
           </button>
         </div>
       </form>
@@ -324,6 +366,36 @@
           Изучить изменения
         </button>
       </div>
+      <section id="draft-card" class="draft-card" aria-live="polite" hidden>
+        <p class="eyebrow">Проверьте задачу</p>
+        <h3 id="draft-question"></h3>
+        <div class="draft-grid">
+          <div class="draft-field wide">
+            <strong>Охват</strong>
+            <span id="draft-scope"></span>
+          </div>
+          <div class="draft-field">
+            <strong>Период</strong>
+            <span id="draft-period"></span>
+          </div>
+          <div class="draft-field">
+            <strong>Ожидаемое время</strong>
+            <span id="draft-estimate"></span>
+          </div>
+          <div class="draft-field wide">
+            <strong>Допущения</strong>
+            <ul id="draft-assumptions"></ul>
+          </div>
+        </div>
+        <div class="draft-actions">
+          <button id="edit-draft" class="quiet-button" type="button">
+            Изменить детали
+          </button>
+          <button id="confirm-draft" class="primary-button" type="button">
+            Начать исследование
+          </button>
+        </div>
+      </section>
       <p id="message" class="notice error" role="alert"></p>
     </section>
 
@@ -355,9 +427,13 @@
     const tabsNode = document.querySelector("#tabs");
     const detailsNode = document.querySelector("#details");
     const questionNode = document.querySelector("#question");
+    const researchForm = document.querySelector("#research-form");
+    const examplesNode = document.querySelector(".examples");
+    const draftCard = document.querySelector("#draft-card");
     let currentIdentity = null;
     let csrfCookieName = "dr_csrf";
     let allRuns = [];
+    let activeDraft = null;
     let selectedRunId = null;
     let selectedGroup = "active";
 
@@ -426,6 +502,7 @@
 
     function showLogin() {
       currentIdentity = null;
+      activeDraft = null;
       workspace.hidden = true;
       loginView.hidden = false;
       document.querySelector("#password").value = "";
@@ -440,6 +517,47 @@
       document.querySelector("#identity").textContent =
         `${identity.login} · ${identity.role}`;
       await loadRuns();
+      if (identity.capabilities.create_run) {
+        await loadCurrentDraft();
+      }
+    }
+
+    function showDraftEditor() {
+      draftCard.hidden = true;
+      researchForm.hidden = false;
+      examplesNode.hidden = false;
+      if (activeDraft) questionNode.value = activeDraft.question;
+      questionNode.focus();
+    }
+
+    function renderDraft(draft) {
+      activeDraft = draft;
+      questionNode.value = draft.question;
+      document.querySelector("#draft-question").textContent = draft.question;
+      document.querySelector("#draft-scope").textContent = draft.scope;
+      document.querySelector("#draft-period").textContent = draft.period;
+      document.querySelector("#draft-estimate").textContent =
+        `до ${draft.estimated_duration_minutes} мин.`;
+      const assumptions = document.querySelector("#draft-assumptions");
+      assumptions.replaceChildren();
+      for (const assumption of draft.assumptions) {
+        assumptions.append(element("li", assumption));
+      }
+      researchForm.hidden = true;
+      examplesNode.hidden = true;
+      draftCard.hidden = false;
+    }
+
+    async function loadCurrentDraft() {
+      const draft = await request("/api/v1/research-drafts/current");
+      if (draft) {
+        renderDraft(draft);
+      } else {
+        activeDraft = null;
+        draftCard.hidden = true;
+        researchForm.hidden = false;
+        examplesNode.hidden = false;
+      }
     }
 
     async function loadRuns({preserveSelection = true} = {}) {
@@ -657,17 +775,51 @@
 
     document.querySelector("#research-form").addEventListener("submit", async event => {
       event.preventDefault();
-      const submit = document.querySelector("#start-research");
+      const submit = document.querySelector("#prepare-research");
+      messageNode.textContent = "";
+      submit.disabled = true;
+      submit.textContent = "Готовим…";
+      try {
+        const draft = await request(
+          activeDraft
+            ? `/api/v1/research-drafts/${activeDraft.id}`
+            : "/api/v1/research-drafts",
+          {
+            method: activeDraft ? "PATCH" : "POST",
+            idempotent: !activeDraft,
+            body: JSON.stringify({question: questionNode.value})
+          }
+        );
+        renderDraft(draft);
+      } catch (error) {
+        messageNode.textContent = error.message;
+      } finally {
+        submit.disabled = false;
+        submit.textContent = "Продолжить";
+      }
+    });
+
+    document.querySelector("#edit-draft").addEventListener("click", () => {
+      messageNode.textContent = "";
+      showDraftEditor();
+    });
+
+    document.querySelector("#confirm-draft").addEventListener("click", async () => {
+      if (!activeDraft) return;
+      const submit = document.querySelector("#confirm-draft");
       messageNode.textContent = "";
       submit.disabled = true;
       submit.textContent = "Запускаем…";
       try {
-        const created = await request("/api/v1/runs", {
-          method: "POST",
-          idempotent: true,
-          body: JSON.stringify({question: questionNode.value})
-        });
+        const created = await request(
+          `/api/v1/research-drafts/${activeDraft.id}/confirm`,
+          {method: "POST", idempotent: true}
+        );
+        activeDraft = null;
         questionNode.value = "";
+        draftCard.hidden = true;
+        researchForm.hidden = false;
+        examplesNode.hidden = false;
         selectedGroup = "active";
         await loadRuns();
         await openRun(created.run_id);

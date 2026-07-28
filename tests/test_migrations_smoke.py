@@ -93,6 +93,7 @@ def main() -> None:
         assert "api_identities" in tables
         assert "browser_sessions" in tables
         assert "research_run_views" in tables
+        assert "research_drafts" in tables
         assert "work_items" in tables
         assert "idempotency_records" in tables
         assert "webhook_subscriptions" in tables
@@ -120,6 +121,12 @@ def main() -> None:
                 "research_reports"
             )
         }
+        draft_columns = {
+            column["name"]
+            for column in inspector.get_columns(
+                "research_drafts"
+            )
+        }
         assert {
             "started_at",
             "created_by_identity_id",
@@ -139,6 +146,19 @@ def main() -> None:
             "approved_at",
             "published_at",
         } <= report_columns
+        assert {
+            "tenant_id",
+            "created_by_identity_id",
+            "run_id",
+            "question",
+            "scope",
+            "period",
+            "assumptions",
+            "estimated_duration_minutes",
+            "status",
+            "created_at",
+            "updated_at",
+        } <= draft_columns
         assert "review_status" in claim_columns
         review_columns = {
             column["name"]
@@ -225,6 +245,7 @@ def main() -> None:
                 "api_identities",
                 "browser_sessions",
                 "research_run_views",
+                "research_drafts",
                 "work_items",
                 "idempotency_records",
                 "webhook_subscriptions",
