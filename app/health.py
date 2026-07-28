@@ -35,6 +35,7 @@ REQUIRED_TABLES = {
     "api_identities",
     "browser_sessions",
     "research_run_views",
+    "research_drafts",
     "work_items",
     "idempotency_records",
     "webhook_subscriptions",

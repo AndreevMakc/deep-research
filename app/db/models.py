@@ -31,6 +31,11 @@ class RunStatus(str, enum.Enum):
     CANCELLED = "cancelled"
 
 
+class ResearchDraftStatus(str, enum.Enum):
+    DRAFT = "draft"
+    CONFIRMED = "confirmed"
+
+
 class TaskStatus(str, enum.Enum):
     PENDING = "pending"
     RUNNING = "running"
@@ -285,6 +290,96 @@ class ResearchRun(Base):
     views: Mapped[list["ResearchRunView"]] = relationship(
         back_populates="run",
         cascade="all, delete-orphan",
+    )
+
+
+class ResearchDraft(Base):
+    __tablename__ = "research_drafts"
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            name="uq_research_draft_run",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    created_by_identity_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey(
+            "api_identities.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey(
+            "research_runs.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
+    )
+
+    question: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+
+    scope: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+
+    period: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    assumptions: Mapped[list[str]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=list,
+    )
+
+    estimated_duration_minutes: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    status: Mapped[ResearchDraftStatus] = mapped_column(
+        Enum(
+            ResearchDraftStatus,
+            name="research_draft_status",
+        ),
+        nullable=False,
+        default=ResearchDraftStatus.DRAFT,
+        index=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+        index=True,
     )
 
 
@@ -1090,6 +1185,12 @@ class Tenant(Base):
         cascade="all, delete-orphan",
     )
 
+    research_drafts: Mapped[
+        list["ResearchDraft"]
+    ] = relationship(
+        cascade="all, delete-orphan",
+    )
+
     api_identities: Mapped[
         list["ApiIdentity"]
     ] = relationship(
@@ -1183,6 +1284,12 @@ class ApiIdentity(Base):
 
     created_runs: Mapped[list["ResearchRun"]] = relationship(
         back_populates="created_by",
+    )
+
+    created_research_drafts: Mapped[
+        list["ResearchDraft"]
+    ] = relationship(
+        cascade="all, delete-orphan",
     )
 
 

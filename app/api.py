@@ -34,6 +34,8 @@ from app.db.models import (
     ApiRole,
     Claim,
     IdempotencyRecord,
+    ResearchDraft,
+    ResearchDraftStatus,
     ResearchRun,
     ResearchRunView,
     ReviewDecisionType,
@@ -70,6 +72,7 @@ from app.operations import (
     review_report,
 )
 from app.queue import request_run_cancellation
+from app.research_drafts import interpret_research_question
 from app.webhooks import (
     enqueue_webhook_event,
     validate_webhook_url,
@@ -88,6 +91,10 @@ bearer = HTTPBearer(
 
 
 class CreateRunRequest(BaseModel):
+    question: str = Field(min_length=3, max_length=10_000)
+
+
+class UpdateResearchDraftRequest(BaseModel):
     question: str = Field(min_length=3, max_length=10_000)
 
 
@@ -431,6 +438,130 @@ def _tenant_run(
     return run
 
 
+def _owned_research_draft(
+    session: Session,
+    identity: ApiIdentity,
+    draft_id: uuid.UUID,
+    *,
+    for_update: bool = False,
+) -> ResearchDraft:
+    statement = select(ResearchDraft).where(
+        ResearchDraft.id == draft_id,
+        ResearchDraft.tenant_id == identity.tenant_id,
+    )
+
+    if identity.role != ApiRole.ADMIN:
+        statement = statement.where(
+            ResearchDraft.created_by_identity_id
+            == identity.id
+        )
+
+    if for_update:
+        statement = statement.with_for_update()
+
+    draft = session.scalar(statement)
+
+    if draft is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Research draft not found",
+        )
+
+    return draft
+
+
+def _research_draft_payload(
+    draft: ResearchDraft,
+) -> dict:
+    return {
+        "id": str(draft.id),
+        "question": draft.question,
+        "scope": draft.scope,
+        "period": draft.period,
+        "assumptions": list(draft.assumptions),
+        "estimated_duration_minutes": (
+            draft.estimated_duration_minutes
+        ),
+        "status": draft.status.value,
+        "run_id": (
+            str(draft.run_id)
+            if draft.run_id is not None
+            else None
+        ),
+        "created_at": draft.created_at.isoformat(),
+        "updated_at": draft.updated_at.isoformat(),
+    }
+
+
+def _apply_draft_interpretation(
+    draft: ResearchDraft,
+    *,
+    question: str,
+) -> None:
+    settings = get_settings()
+    interpretation = interpret_research_question(
+        question,
+        max_run_seconds=settings.max_run_seconds,
+    )
+    draft.question = question
+    draft.scope = interpretation.scope
+    draft.period = interpretation.period
+    draft.assumptions = interpretation.assumptions
+    draft.estimated_duration_minutes = (
+        interpretation.estimated_duration_minutes
+    )
+
+
+def _create_run_records(
+    session: Session,
+    *,
+    identity: ApiIdentity,
+    question: str,
+) -> tuple[ResearchRun, WorkItem, dict]:
+    settings = get_settings()
+    title = generate_run_title(question)
+    run = ResearchRun(
+        tenant_id=identity.tenant_id,
+        created_by_identity_id=identity.id,
+        question=question,
+        title=title,
+        status=RunStatus.CREATED,
+        max_external_requests=settings.max_external_requests,
+        max_sources=settings.max_sources,
+        max_claims=settings.max_claims,
+        max_tokens=settings.max_tokens,
+        max_run_seconds=settings.max_run_seconds,
+    )
+    session.add(run)
+    session.flush()
+    item = WorkItem(
+        tenant_id=identity.tenant_id,
+        run_id=run.id,
+        kind="execute_research_run",
+        status=WorkStatus.QUEUED,
+        payload={"run_id": str(run.id)},
+        attempts=0,
+        max_attempts=3,
+        cancel_requested=False,
+    )
+    session.add(item)
+    session.flush()
+    result = {
+        "run_id": str(run.id),
+        "work_item_id": str(item.id),
+        "status": run.status.value,
+        "title": run.title,
+    }
+    enqueue_webhook_event(
+        session,
+        tenant_id=identity.tenant_id,
+        run_id=run.id,
+        event_type="run.created",
+        payload=result,
+    )
+    return run, item, result
+
+
 def _tenant_reviewer(
     session: Session,
     identity: ApiIdentity,
@@ -698,6 +829,225 @@ def ready(response: Response) -> dict:
 
 
 @app.post(
+    "/api/v1/research-drafts",
+    status_code=status.HTTP_201_CREATED,
+)
+def create_research_draft(
+    body: CreateRunRequest,
+    idempotency_key: IdempotencyKey,
+    identity: IdentityDependency,
+    session: SessionDependency,
+):
+    _require(identity, "create_run")
+    question = body.question.strip()
+
+    if len(question) < 3:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Question must contain at least 3 characters",
+        )
+
+    payload = {"question": question}
+    request_hash = _request_hash(
+        "create_research_draft",
+        payload,
+    )
+    cached = _cached_idempotency(
+        session,
+        identity=identity,
+        key=idempotency_key,
+        request_hash=request_hash,
+    )
+
+    if cached is not None:
+        return cached
+
+    draft = ResearchDraft(
+        tenant_id=identity.tenant_id,
+        created_by_identity_id=identity.id,
+        question=question,
+        scope="",
+        period="",
+        assumptions=[],
+        estimated_duration_minutes=5,
+        status=ResearchDraftStatus.DRAFT,
+    )
+    _apply_draft_interpretation(
+        draft,
+        question=question,
+    )
+    session.add(draft)
+    session.flush()
+    result = _research_draft_payload(draft)
+    _store_idempotency(
+        session,
+        identity=identity,
+        key=idempotency_key,
+        request_hash=request_hash,
+        response_json=result,
+        status_code=status.HTTP_201_CREATED,
+    )
+
+    try:
+        session.commit()
+    except IntegrityError as error:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Concurrent idempotent request conflict",
+        ) from error
+
+    return result
+
+
+@app.get("/api/v1/research-drafts/current")
+def get_current_research_draft(
+    identity: IdentityDependency,
+    session: SessionDependency,
+) -> dict | None:
+    _require(identity, "create_run")
+    draft = session.scalar(
+        select(ResearchDraft)
+        .where(
+            ResearchDraft.tenant_id
+            == identity.tenant_id,
+            ResearchDraft.created_by_identity_id
+            == identity.id,
+            ResearchDraft.status
+            == ResearchDraftStatus.DRAFT,
+        )
+        .order_by(ResearchDraft.updated_at.desc())
+        .limit(1)
+    )
+    return (
+        _research_draft_payload(draft)
+        if draft is not None
+        else None
+    )
+
+
+@app.get("/api/v1/research-drafts/{draft_id}")
+def get_research_draft(
+    draft_id: uuid.UUID,
+    identity: IdentityDependency,
+    session: SessionDependency,
+) -> dict:
+    _require(identity, "create_run")
+    return _research_draft_payload(
+        _owned_research_draft(
+            session,
+            identity,
+            draft_id,
+        )
+    )
+
+
+@app.patch("/api/v1/research-drafts/{draft_id}")
+def update_research_draft(
+    draft_id: uuid.UUID,
+    body: UpdateResearchDraftRequest,
+    identity: IdentityDependency,
+    session: SessionDependency,
+) -> dict:
+    _require(identity, "create_run")
+    draft = _owned_research_draft(
+        session,
+        identity,
+        draft_id,
+        for_update=True,
+    )
+
+    if draft.status != ResearchDraftStatus.DRAFT:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Confirmed research draft cannot be changed",
+        )
+
+    question = body.question.strip()
+
+    if len(question) < 3:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Question must contain at least 3 characters",
+        )
+
+    _apply_draft_interpretation(
+        draft,
+        question=question,
+    )
+    draft.updated_at = datetime.now(timezone.utc)
+    session.commit()
+    session.refresh(draft)
+    return _research_draft_payload(draft)
+
+
+@app.post(
+    "/api/v1/research-drafts/{draft_id}/confirm",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def confirm_research_draft(
+    draft_id: uuid.UUID,
+    idempotency_key: IdempotencyKey,
+    identity: IdentityDependency,
+    session: SessionDependency,
+):
+    _require(identity, "create_run")
+    draft = _owned_research_draft(
+        session,
+        identity,
+        draft_id,
+        for_update=True,
+    )
+    request_hash = _request_hash(
+        "confirm_research_draft",
+        {"draft_id": str(draft.id)},
+    )
+    cached = _cached_idempotency(
+        session,
+        identity=identity,
+        key=idempotency_key,
+        request_hash=request_hash,
+    )
+
+    if cached is not None:
+        return cached
+
+    if draft.status != ResearchDraftStatus.DRAFT:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Research draft is already confirmed",
+        )
+
+    run, _, result = _create_run_records(
+        session,
+        identity=identity,
+        question=draft.question,
+    )
+    draft.status = ResearchDraftStatus.CONFIRMED
+    draft.run_id = run.id
+    draft.updated_at = datetime.now(timezone.utc)
+    _store_idempotency(
+        session,
+        identity=identity,
+        key=idempotency_key,
+        request_hash=request_hash,
+        response_json=result,
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+
+    try:
+        session.commit()
+    except IntegrityError as error:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Concurrent draft confirmation conflict",
+        ) from error
+
+    return result
+
+
+@app.post(
     "/api/v1/runs",
     status_code=status.HTTP_202_ACCEPTED,
 )
@@ -728,40 +1078,11 @@ def create_run(
     if cached is not None:
         return cached
 
-    settings = get_settings()
-    title = generate_run_title(question)
-    run = ResearchRun(
-        tenant_id=identity.tenant_id,
-        created_by_identity_id=identity.id,
+    _, _, result = _create_run_records(
+        session,
+        identity=identity,
         question=question,
-        title=title,
-        status=RunStatus.CREATED,
-        max_external_requests=settings.max_external_requests,
-        max_sources=settings.max_sources,
-        max_claims=settings.max_claims,
-        max_tokens=settings.max_tokens,
-        max_run_seconds=settings.max_run_seconds,
     )
-    session.add(run)
-    session.flush()
-    item = WorkItem(
-        tenant_id=identity.tenant_id,
-        run_id=run.id,
-        kind="execute_research_run",
-        status=WorkStatus.QUEUED,
-        payload={"run_id": str(run.id)},
-        attempts=0,
-        max_attempts=3,
-        cancel_requested=False,
-    )
-    session.add(item)
-    session.flush()
-    result = {
-        "run_id": str(run.id),
-        "work_item_id": str(item.id),
-        "status": run.status.value,
-        "title": run.title,
-    }
     _store_idempotency(
         session,
         identity=identity,
@@ -770,14 +1091,6 @@ def create_run(
         response_json=result,
         status_code=status.HTTP_202_ACCEPTED,
     )
-    enqueue_webhook_event(
-        session,
-        tenant_id=identity.tenant_id,
-        run_id=run.id,
-        event_type="run.created",
-        payload=result,
-    )
-
     try:
         session.commit()
     except IntegrityError as error:
