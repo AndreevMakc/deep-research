@@ -155,6 +155,10 @@ def main() -> None:
             "period",
             "assumptions",
             "estimated_duration_minutes",
+            "requires_clarification",
+            "clarification_questions",
+            "clarification_answers",
+            "clarification_index",
             "revision",
             "status",
             "created_at",
@@ -168,6 +172,11 @@ def main() -> None:
         }
         assert (
             "ck_research_drafts_revision_positive"
+            in draft_checks
+        )
+        assert (
+            "ck_research_drafts_"
+            "clarification_index_nonnegative"
             in draft_checks
         )
         assert "review_status" in claim_columns

@@ -186,6 +186,28 @@
       text-transform: uppercase;
     }
     .draft-field ul { margin: 6px 0 0; padding-left: 20px; }
+    .clarification-progress {
+      color: var(--muted);
+      font-size: .84rem;
+    }
+    .clarification-options {
+      display: grid;
+      gap: 8px;
+      margin: 18px 0;
+    }
+    .choice-button {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      color: var(--ink);
+      padding: 11px 13px;
+      text-align: left;
+    }
+    .choice-button:hover,
+    .choice-button[aria-pressed="true"] {
+      border-color: var(--green);
+      background: var(--green-soft);
+    }
     .draft-editor {
       border: 1px solid #b9c6bf;
       border-radius: 20px;
@@ -381,6 +403,30 @@
           Изучить изменения
         </button>
       </div>
+      <section id="clarification-card" class="draft-card"
+        aria-live="polite" hidden>
+        <p class="eyebrow">Уточните задачу</p>
+        <p id="clarification-progress" class="clarification-progress"></p>
+        <h3 id="clarification-question"></h3>
+        <form id="clarification-form">
+          <div id="clarification-options" class="clarification-options"
+            role="group" aria-label="Готовые варианты ответа"></div>
+          <label>Свой ответ
+            <textarea id="clarification-answer" maxlength="500"
+              placeholder="Можно выбрать вариант выше или написать свой"
+            ></textarea>
+          </label>
+          <div class="draft-actions">
+            <button id="skip-clarification" class="quiet-button" type="button">
+              Пропустить
+            </button>
+            <button id="answer-clarification" class="primary-button"
+              type="submit">
+              Продолжить
+            </button>
+          </div>
+        </form>
+      </section>
       <section id="draft-card" class="draft-card" aria-live="polite" hidden>
         <p class="eyebrow">Проверьте задачу</p>
         <h3 id="draft-question"></h3>
@@ -470,6 +516,14 @@
     const questionNode = document.querySelector("#question");
     const researchForm = document.querySelector("#research-form");
     const examplesNode = document.querySelector(".examples");
+    const clarificationCard =
+      document.querySelector("#clarification-card");
+    const clarificationForm =
+      document.querySelector("#clarification-form");
+    const clarificationAnswer =
+      document.querySelector("#clarification-answer");
+    const clarificationOptions =
+      document.querySelector("#clarification-options");
     const draftCard = document.querySelector("#draft-card");
     const draftEditForm = document.querySelector("#draft-edit-form");
     const draftScopeInput = document.querySelector("#draft-scope-input");
@@ -578,6 +632,7 @@
 
     function showDraftEditor() {
       draftCard.hidden = true;
+      clarificationCard.hidden = true;
       researchForm.hidden = true;
       examplesNode.hidden = true;
       draftEditForm.hidden = false;
@@ -587,9 +642,49 @@
       draftScopeInput.focus();
     }
 
+    function renderClarification(draft) {
+      activeDraft = draft;
+      const clarification = draft.clarification;
+      const currentQuestion = clarification.current_question;
+      document.querySelector("#clarification-progress").textContent =
+        `Шаг ${clarification.current_step} из ${clarification.total_steps}`;
+      document.querySelector("#clarification-question").textContent =
+        currentQuestion.prompt;
+      clarificationAnswer.value = "";
+      clarificationOptions.replaceChildren();
+      for (const option of currentQuestion.options) {
+        const button = element("button", option, "choice-button");
+        button.type = "button";
+        button.setAttribute("aria-pressed", "false");
+        button.addEventListener("click", () => {
+          clarificationAnswer.value = option;
+          for (const sibling of clarificationOptions.children) {
+            sibling.setAttribute(
+              "aria-pressed",
+              sibling === button ? "true" : "false"
+            );
+          }
+          clarificationAnswer.focus();
+        });
+        clarificationOptions.append(button);
+      }
+      researchForm.hidden = true;
+      examplesNode.hidden = true;
+      draftCard.hidden = true;
+      draftEditForm.hidden = true;
+      clarificationCard.hidden = false;
+      clarificationAnswer.focus();
+    }
+
     function renderDraft(draft) {
       activeDraft = draft;
       questionNode.value = draft.question;
+
+      if (!draft.clarification.completed) {
+        renderClarification(draft);
+        return;
+      }
+
       document.querySelector("#draft-question").textContent = draft.question;
       document.querySelector("#draft-scope").textContent = draft.scope;
       document.querySelector("#draft-period").textContent = draft.period;
@@ -602,6 +697,7 @@
       }
       researchForm.hidden = true;
       examplesNode.hidden = true;
+      clarificationCard.hidden = true;
       draftEditForm.hidden = true;
       draftCard.hidden = false;
     }
@@ -612,6 +708,7 @@
         renderDraft(draft);
       } else {
         activeDraft = null;
+        clarificationCard.hidden = true;
         draftCard.hidden = true;
         draftEditForm.hidden = true;
         researchForm.hidden = false;
@@ -863,6 +960,58 @@
       showDraftEditor();
     });
 
+    async function submitClarification({skipped = false} = {}) {
+      if (!activeDraft) return;
+      const clarification = activeDraft.clarification;
+      const currentQuestion = clarification.current_question;
+      const submit = document.querySelector("#answer-clarification");
+      const skip = document.querySelector("#skip-clarification");
+      messageNode.textContent = "";
+      submit.disabled = true;
+      skip.disabled = true;
+      submit.textContent = "Сохраняем…";
+      try {
+        const draft = await request(
+          `/api/v1/research-drafts/${activeDraft.id}/clarifications/answer`,
+          {
+            method: "POST",
+            idempotent: true,
+            body: JSON.stringify({
+              revision: activeDraft.revision,
+              question_id: currentQuestion.id,
+              answer: skipped ? null : clarificationAnswer.value,
+              skipped
+            })
+          }
+        );
+        renderDraft(draft);
+      } catch (error) {
+        if (
+          error.status === 409 &&
+          error.detail?.current_draft
+        ) {
+          renderDraft(error.detail.current_draft);
+        }
+        messageNode.textContent = error.message;
+      } finally {
+        submit.disabled = false;
+        skip.disabled = false;
+        submit.textContent = "Продолжить";
+      }
+    }
+
+    clarificationForm.addEventListener("submit", async event => {
+      event.preventDefault();
+      await submitClarification();
+    });
+
+    document.querySelector("#skip-clarification").addEventListener(
+      "click",
+      async () => {
+        await submitClarification({skipped: true});
+      }
+    );
+
     document.querySelector("#cancel-draft-edit").addEventListener("click", () => {
       messageNode.textContent = "";
       if (activeDraft) renderDraft(activeDraft);
@@ -924,6 +1073,7 @@
         activeDraft = null;
         questionNode.value = "";
         draftCard.hidden = true;
+        clarificationCard.hidden = true;
         draftEditForm.hidden = true;
         researchForm.hidden = false;
         examplesNode.hidden = false;

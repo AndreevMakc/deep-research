@@ -5,6 +5,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     Enum,
@@ -305,6 +306,13 @@ class ResearchDraft(Base):
             "revision >= 1",
             name="ck_research_drafts_revision_positive",
         ),
+        CheckConstraint(
+            "clarification_index >= 0",
+            name=(
+                "ck_research_drafts_"
+                "clarification_index_nonnegative"
+            ),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -361,6 +369,36 @@ class ResearchDraft(Base):
     estimated_duration_minutes: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
+    )
+
+    requires_clarification: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
+
+    clarification_questions: Mapped[list[dict]] = (
+        mapped_column(
+            JSONB,
+            nullable=False,
+            default=list,
+            server_default="[]",
+        )
+    )
+
+    clarification_answers: Mapped[list[dict]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=list,
+        server_default="[]",
+    )
+
+    clarification_index: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
     )
 
     revision: Mapped[int] = mapped_column(
