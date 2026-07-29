@@ -210,7 +210,9 @@ class DashboardBrowserTests(unittest.TestCase):
         self,
     ) -> None:
         question = (
-            "Какие факторы влияют на выбор платформы?"
+            "Какие факторы влияют на выбор платформы "
+            "для российских B2B-команд за 2025 год "
+            "по стоимости владения и безопасности?"
         )
         self._login()
         expect(self.page.locator("#runs")).to_contain_text(
@@ -356,7 +358,9 @@ class DashboardBrowserTests(unittest.TestCase):
     ) -> None:
         self._login()
         self.page.locator("#question").fill(
-            "Как выбрать формат исследования?"
+            "Как выбрать формат исследования для "
+            "российских B2B-команд за 2025 год "
+            "по стоимости и качеству итогового отчёта?"
         )
         self.page.get_by_role(
             "button",
@@ -422,6 +426,92 @@ class DashboardBrowserTests(unittest.TestCase):
             self.assertIsNotNone(draft)
             self.assertEqual(draft.scope, unsaved_scope)
             self.assertEqual(draft.revision, 3)
+
+    def test_clarification_progress_recovers_after_reload(
+        self,
+    ) -> None:
+        self._login()
+        self.page.locator("#question").fill(
+            "Какая платформа лучше?"
+        )
+        self.page.get_by_role(
+            "button",
+            name="Продолжить",
+        ).click()
+        expect(
+            self.page.locator("#clarification-card")
+        ).to_be_visible()
+        expect(
+            self.page.locator("#clarification-progress")
+        ).to_have_text("Шаг 1 из 3")
+
+        first_option = self.page.locator(
+            "#clarification-options .choice-button"
+        ).first
+        first_option.click()
+        expect(
+            self.page.locator("#clarification-answer")
+        ).not_to_have_value("")
+        self.page.get_by_role(
+            "button",
+            name="Продолжить",
+        ).click()
+        expect(
+            self.page.locator("#clarification-progress")
+        ).to_have_text("Шаг 2 из 3")
+
+        self.page.reload(wait_until="domcontentloaded")
+        expect(
+            self.page.locator("#login-view")
+        ).to_be_hidden()
+        expect(
+            self.page.locator("#clarification-progress")
+        ).to_have_text("Шаг 2 из 3")
+        self.page.get_by_role(
+            "button",
+            name="Пропустить",
+        ).click()
+        expect(
+            self.page.locator("#clarification-progress")
+        ).to_have_text("Шаг 3 из 3")
+
+        self.page.locator("#clarification-answer").fill(
+            "Последние 12 месяцев"
+        )
+        self.page.get_by_role(
+            "button",
+            name="Продолжить",
+        ).click()
+        expect(
+            self.page.locator("#draft-card")
+        ).to_be_visible()
+        expect(
+            self.page.locator("#draft-period")
+        ).to_have_text("Последние 12 месяцев")
+
+        with SessionFactory() as session:
+            draft = session.scalar(
+                select(ResearchDraft).where(
+                    ResearchDraft.tenant_id
+                    == self.tenant_id
+                )
+            )
+            self.assertIsNotNone(draft)
+            self.assertEqual(draft.clarification_index, 3)
+            self.assertEqual(
+                len(draft.clarification_answers),
+                3,
+            )
+            self.assertEqual(draft.revision, 4)
+            self.assertEqual(
+                session.scalar(
+                    select(func.count(ResearchRun.id)).where(
+                        ResearchRun.tenant_id
+                        == self.tenant_id
+                    )
+                ),
+                0,
+            )
 
     def test_draft_error_is_visible_without_creating_run(
         self,

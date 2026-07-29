@@ -24,7 +24,11 @@ from app.multitenancy import (
     create_password_identity,
     create_tenant,
 )
-from app.research_drafts import interpret_research_question
+from app.research_drafts import (
+    build_clarification_questions,
+    interpret_research_question,
+    refine_interpretation_with_answers,
+)
 
 
 class ResearchDraftInterpretationTests(unittest.TestCase):
@@ -44,6 +48,70 @@ class ResearchDraftInterpretationTests(unittest.TestCase):
             60,
         )
         self.assertEqual(len(interpretation.assumptions), 2)
+
+    def test_distinguishes_specific_and_ambiguous_questions(
+        self,
+    ) -> None:
+        specific = build_clarification_questions(
+            "Сравнить PostgreSQL и MySQL для российских "
+            "B2B-команд за 2025 год по стоимости "
+            "владения и безопасности."
+        )
+        ambiguous = build_clarification_questions(
+            "Какая платформа лучше?"
+        )
+
+        self.assertEqual(specific, [])
+        self.assertGreaterEqual(len(ambiguous), 2)
+        self.assertLessEqual(len(ambiguous), 4)
+        self.assertTrue(
+            all(question.options for question in ambiguous)
+        )
+
+    def test_answers_refine_public_interpretation(
+        self,
+    ) -> None:
+        interpretation = interpret_research_question(
+            "Какая платформа лучше?",
+            max_run_seconds=600,
+        )
+        refined = refine_interpretation_with_answers(
+            interpretation,
+            questions=[
+                {
+                    "id": "scope",
+                    "prompt": "Какой охват?",
+                    "options": [],
+                },
+                {
+                    "id": "period",
+                    "prompt": "Какой период?",
+                    "options": [],
+                },
+            ],
+            answers=[
+                {
+                    "question_id": "scope",
+                    "answer": "Сравнить три варианта",
+                    "skipped": False,
+                },
+                {
+                    "question_id": "period",
+                    "answer": "Последние 12 месяцев",
+                    "skipped": False,
+                },
+            ],
+        )
+
+        self.assertIn("Сравнить три варианта", refined.scope)
+        self.assertEqual(
+            refined.period,
+            "Последние 12 месяцев",
+        )
+        self.assertGreater(
+            len(refined.assumptions),
+            len(interpretation.assumptions),
+        )
 
 
 class ResearchDraftApiTests(unittest.TestCase):
@@ -217,18 +285,21 @@ class ResearchDraftApiTests(unittest.TestCase):
 
         return headers
 
-    def _create_draft(self) -> dict:
+    def _create_draft(
+        self,
+        question: str = (
+            "Сравнить PostgreSQL и MySQL для российских "
+            "B2B-команд за 2025 год по стоимости "
+            "владения и безопасности."
+        ),
+    ) -> dict:
         response = self.client.post(
             "/api/v1/research-drafts",
             headers=self._headers(
                 self.client,
                 idempotency_key="create-draft-0001",
             ),
-            json={
-                "question": (
-                    "Какие альтернативы этому решению?"
-                )
-            },
+            json={"question": question},
         )
         self.assertEqual(response.status_code, 201)
         return response.json()
@@ -239,6 +310,12 @@ class ResearchDraftApiTests(unittest.TestCase):
         created = self._create_draft()
         self.assertEqual(created["status"], "draft")
         self.assertEqual(created["revision"], 1)
+        self.assertFalse(
+            created["clarification"]["required"]
+        )
+        self.assertTrue(
+            created["clarification"]["completed"]
+        )
         self.assertIsNone(created["run_id"])
         self.assertTrue(created["scope"])
         self.assertTrue(created["period"])
@@ -251,11 +328,7 @@ class ResearchDraftApiTests(unittest.TestCase):
                 self.client,
                 idempotency_key="create-draft-0001",
             ),
-            json={
-                "question": (
-                    "Какие альтернативы этому решению?"
-                )
-            },
+            json={"question": created["question"]},
         )
         self.assertEqual(replay.status_code, 201)
         self.assertEqual(
@@ -468,6 +541,183 @@ class ResearchDraftApiTests(unittest.TestCase):
                 1,
             )
 
+    def test_clarification_dialog_is_finite_and_idempotent(
+        self,
+    ) -> None:
+        created = self._create_draft(
+            "Какая платформа лучше?"
+        )
+        clarification = created["clarification"]
+        self.assertTrue(clarification["required"])
+        self.assertFalse(clarification["completed"])
+        self.assertGreaterEqual(
+            clarification["total_steps"],
+            2,
+        )
+        self.assertLessEqual(
+            clarification["total_steps"],
+            4,
+        )
+        self.assertEqual(clarification["current_step"], 1)
+
+        blocked_confirmation = self.client.post(
+            (
+                f"/api/v1/research-drafts/"
+                f"{created['id']}/confirm"
+            ),
+            headers=self._headers(
+                self.client,
+                idempotency_key="confirm-before-answers-0001",
+            ),
+            json={"revision": created["revision"]},
+        )
+        self.assertEqual(
+            blocked_confirmation.status_code,
+            409,
+        )
+        self.assertEqual(
+            blocked_confirmation.json()["detail"]["code"],
+            "clarification_required",
+        )
+
+        first_question = clarification["current_question"]
+        first_payload = {
+            "revision": created["revision"],
+            "question_id": first_question["id"],
+            "answer": first_question["options"][0],
+            "skipped": False,
+        }
+        first_answer = self.client.post(
+            (
+                f"/api/v1/research-drafts/{created['id']}"
+                "/clarifications/answer"
+            ),
+            headers=self._headers(
+                self.client,
+                idempotency_key="answer-clarification-0001",
+            ),
+            json=first_payload,
+        )
+        self.assertEqual(first_answer.status_code, 200)
+        current = first_answer.json()
+        self.assertEqual(current["revision"], 2)
+        self.assertEqual(
+            current["clarification"]["current_step"],
+            2,
+        )
+
+        replay = self.client.post(
+            (
+                f"/api/v1/research-drafts/{created['id']}"
+                "/clarifications/answer"
+            ),
+            headers=self._headers(
+                self.client,
+                idempotency_key="answer-clarification-0001",
+            ),
+            json=first_payload,
+        )
+        self.assertEqual(replay.status_code, 200)
+        self.assertEqual(
+            replay.headers["Idempotency-Replayed"],
+            "true",
+        )
+        self.assertEqual(
+            replay.json()["clarification"]["current_step"],
+            2,
+        )
+
+        recovered = self.client.get(
+            "/api/v1/research-drafts/current"
+        )
+        self.assertEqual(recovered.status_code, 200)
+        self.assertEqual(
+            recovered.json()["clarification"]["current_step"],
+            2,
+        )
+
+        answer_index = 2
+
+        while not current["clarification"]["completed"]:
+            question = current["clarification"][
+                "current_question"
+            ]
+            skipped = answer_index == 2
+            response = self.client.post(
+                (
+                    f"/api/v1/research-drafts/"
+                    f"{created['id']}/clarifications/answer"
+                ),
+                headers=self._headers(
+                    self.client,
+                    idempotency_key=(
+                        "answer-clarification-"
+                        f"{answer_index:04d}"
+                    ),
+                ),
+                json={
+                    "revision": current["revision"],
+                    "question_id": question["id"],
+                    "answer": (
+                        None
+                        if skipped
+                        else question["options"][0]
+                    ),
+                    "skipped": skipped,
+                },
+            )
+            self.assertEqual(response.status_code, 200)
+            current = response.json()
+            answer_index += 1
+
+        self.assertEqual(
+            len(current["clarification"]["answers"]),
+            current["clarification"]["total_steps"],
+        )
+        self.assertEqual(
+            current["revision"],
+            1 + current["clarification"]["total_steps"],
+        )
+        self.assertTrue(current["scope"])
+        self.assertGreater(len(current["assumptions"]), 2)
+
+        stale_repeat = self.client.post(
+            (
+                f"/api/v1/research-drafts/{created['id']}"
+                "/clarifications/answer"
+            ),
+            headers=self._headers(
+                self.client,
+                idempotency_key="answer-stale-clarification-0001",
+            ),
+            json=first_payload,
+        )
+        self.assertEqual(stale_repeat.status_code, 409)
+
+        confirmed = self.client.post(
+            (
+                f"/api/v1/research-drafts/"
+                f"{created['id']}/confirm"
+            ),
+            headers=self._headers(
+                self.client,
+                idempotency_key="confirm-after-answers-0001",
+            ),
+            json={"revision": current["revision"]},
+        )
+        self.assertEqual(confirmed.status_code, 202)
+
+        with SessionFactory() as session:
+            self.assertEqual(
+                session.scalar(
+                    select(func.count(ResearchRun.id)).where(
+                        ResearchRun.tenant_id
+                        == self.tenant_id
+                    )
+                ),
+                1,
+            )
+
     def test_draft_is_hidden_from_other_identities(
         self,
     ) -> None:
@@ -505,6 +755,35 @@ class ResearchDraftApiTests(unittest.TestCase):
         )
         self.assertEqual(denied_update.status_code, 404)
 
+        ambiguous = self.client.post(
+            "/api/v1/research-drafts",
+            headers=self._headers(
+                self.client,
+                idempotency_key="create-hidden-clarification",
+            ),
+            json={"question": "Какой рынок выбрать?"},
+        ).json()
+        question = ambiguous["clarification"][
+            "current_question"
+        ]
+        denied_answer = self.cross_tenant_client.post(
+            (
+                f"/api/v1/research-drafts/"
+                f"{ambiguous['id']}/clarifications/answer"
+            ),
+            headers=self._headers(
+                self.cross_tenant_client,
+                idempotency_key="answer-hidden-clarification",
+            ),
+            json={
+                "revision": ambiguous["revision"],
+                "question_id": question["id"],
+                "answer": question["options"][0],
+                "skipped": False,
+            },
+        )
+        self.assertEqual(denied_answer.status_code, 404)
+
 
 class ResearchDraftDashboardTests(unittest.TestCase):
     def test_dashboard_uses_confirmation_flow(self) -> None:
@@ -518,6 +797,7 @@ class ResearchDraftDashboardTests(unittest.TestCase):
         self.assertIn('id="draft-card"', dashboard)
         self.assertIn("Изменить детали", dashboard)
         self.assertIn('id="draft-edit-form"', dashboard)
+        self.assertIn('id="clarification-card"', dashboard)
         self.assertIn("draft_revision_conflict", dashboard)
         self.assertIn(
             '"/api/v1/research-drafts"',

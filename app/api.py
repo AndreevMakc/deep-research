@@ -72,7 +72,11 @@ from app.operations import (
     review_report,
 )
 from app.queue import request_run_cancellation
-from app.research_drafts import interpret_research_question
+from app.research_drafts import (
+    build_clarification_questions,
+    interpret_research_question,
+    refine_interpretation_with_answers,
+)
 from app.webhooks import (
     enqueue_webhook_event,
     validate_webhook_url,
@@ -106,6 +110,16 @@ class UpdateResearchDraftRequest(BaseModel):
 
 class ConfirmResearchDraftRequest(BaseModel):
     revision: int = Field(ge=1)
+
+
+class AnswerClarificationRequest(BaseModel):
+    revision: int = Field(ge=1)
+    question_id: str = Field(min_length=1, max_length=50)
+    answer: str | None = Field(
+        default=None,
+        max_length=500,
+    )
+    skipped: bool = False
 
 
 class UpdateRunRequest(BaseModel):
@@ -483,6 +497,24 @@ def _owned_research_draft(
 def _research_draft_payload(
     draft: ResearchDraft,
 ) -> dict:
+    clarification_questions = list(
+        draft.clarification_questions
+    )
+    clarification_answers = list(
+        draft.clarification_answers
+    )
+    total_steps = len(clarification_questions)
+    clarification_pending = (
+        draft.requires_clarification
+        and draft.clarification_index < total_steps
+    )
+    current_question = (
+        clarification_questions[
+            draft.clarification_index
+        ]
+        if clarification_pending
+        else None
+    )
     return {
         "id": str(draft.id),
         "question": draft.question,
@@ -493,6 +525,18 @@ def _research_draft_payload(
             draft.estimated_duration_minutes
         ),
         "revision": draft.revision,
+        "clarification": {
+            "required": draft.requires_clarification,
+            "completed": not clarification_pending,
+            "current_step": (
+                draft.clarification_index + 1
+                if clarification_pending
+                else total_steps
+            ),
+            "total_steps": total_steps,
+            "current_question": current_question,
+            "answers": clarification_answers,
+        },
         "status": draft.status.value,
         "run_id": (
             str(draft.run_id)
@@ -537,6 +581,27 @@ def _apply_draft_interpretation(
     draft.assumptions = interpretation.assumptions
     draft.estimated_duration_minutes = (
         interpretation.estimated_duration_minutes
+    )
+
+
+def _apply_completed_clarifications(
+    draft: ResearchDraft,
+) -> None:
+    settings = get_settings()
+    interpretation = interpret_research_question(
+        draft.question,
+        max_run_seconds=settings.max_run_seconds,
+    )
+    refined = refine_interpretation_with_answers(
+        interpretation,
+        questions=list(draft.clarification_questions),
+        answers=list(draft.clarification_answers),
+    )
+    draft.scope = refined.scope
+    draft.period = refined.period
+    draft.assumptions = refined.assumptions
+    draft.estimated_duration_minutes = (
+        refined.estimated_duration_minutes
     )
 
 
@@ -898,11 +963,27 @@ def create_research_draft(
         period="",
         assumptions=[],
         estimated_duration_minutes=5,
+        requires_clarification=False,
+        clarification_questions=[],
+        clarification_answers=[],
+        clarification_index=0,
         status=ResearchDraftStatus.DRAFT,
     )
     _apply_draft_interpretation(
         draft,
         question=question,
+    )
+    clarification_questions = [
+        clarification.as_dict()
+        for clarification in build_clarification_questions(
+            question
+        )
+    ]
+    draft.requires_clarification = bool(
+        clarification_questions
+    )
+    draft.clarification_questions = (
+        clarification_questions
     )
     session.add(draft)
     session.flush()
@@ -991,6 +1072,19 @@ def update_research_draft(
             detail="Confirmed research draft cannot be changed",
         )
 
+    if (
+        draft.requires_clarification
+        and draft.clarification_index
+        < len(draft.clarification_questions)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Завершите уточнения перед "
+                "редактированием интерпретации"
+            ),
+        )
+
     if body.revision != draft.revision:
         _raise_draft_revision_conflict(draft)
 
@@ -1040,6 +1134,143 @@ def update_research_draft(
 
 
 @app.post(
+    (
+        "/api/v1/research-drafts/{draft_id}"
+        "/clarifications/answer"
+    ),
+)
+def answer_research_draft_clarification(
+    draft_id: uuid.UUID,
+    body: AnswerClarificationRequest,
+    idempotency_key: IdempotencyKey,
+    identity: IdentityDependency,
+    session: SessionDependency,
+) -> dict:
+    _require(identity, "create_run")
+    draft = _owned_research_draft(
+        session,
+        identity,
+        draft_id,
+        for_update=True,
+    )
+    normalized_answer = (
+        body.answer.strip()
+        if body.answer is not None
+        else None
+    )
+    request_payload = {
+        "draft_id": str(draft.id),
+        "revision": body.revision,
+        "question_id": body.question_id,
+        "answer": normalized_answer,
+        "skipped": body.skipped,
+    }
+    request_hash = _request_hash(
+        "answer_research_draft_clarification",
+        request_payload,
+    )
+    cached = _cached_idempotency(
+        session,
+        identity=identity,
+        key=idempotency_key,
+        request_hash=request_hash,
+    )
+
+    if cached is not None:
+        return cached
+
+    if draft.status != ResearchDraftStatus.DRAFT:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Research draft is already confirmed",
+        )
+
+    if body.revision != draft.revision:
+        _raise_draft_revision_conflict(draft)
+
+    questions = list(draft.clarification_questions)
+
+    if (
+        not draft.requires_clarification
+        or draft.clarification_index >= len(questions)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Уточняющий диалог уже завершён",
+        )
+
+    current_question = questions[
+        draft.clarification_index
+    ]
+
+    if body.question_id != current_question["id"]:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "clarification_step_conflict",
+                "message": (
+                    "Открыт другой шаг уточнения. "
+                    "Обновите текущий вопрос."
+                ),
+                "current_draft": (
+                    _research_draft_payload(draft)
+                ),
+            },
+        )
+
+    if not body.skipped and not normalized_answer:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                "Выберите вариант, введите ответ "
+                "или пропустите вопрос"
+            ),
+        )
+
+    answers = list(draft.clarification_answers)
+    answers.append(
+        {
+            "question_id": current_question["id"],
+            "answer": (
+                None if body.skipped else normalized_answer
+            ),
+            "skipped": body.skipped,
+        }
+    )
+    draft.clarification_answers = answers
+    draft.clarification_index += 1
+    draft.revision += 1
+    draft.updated_at = datetime.now(timezone.utc)
+
+    if draft.clarification_index >= len(questions):
+        _apply_completed_clarifications(draft)
+
+    session.flush()
+    result = _research_draft_payload(draft)
+    _store_idempotency(
+        session,
+        identity=identity,
+        key=idempotency_key,
+        request_hash=request_hash,
+        response_json=result,
+        status_code=status.HTTP_200_OK,
+    )
+
+    try:
+        session.commit()
+    except IntegrityError as error:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Concurrent clarification answer conflict"
+            ),
+        ) from error
+
+    return result
+
+
+@app.post(
     "/api/v1/research-drafts/{draft_id}/confirm",
     status_code=status.HTTP_202_ACCEPTED,
 )
@@ -1078,6 +1309,24 @@ def confirm_research_draft(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Research draft is already confirmed",
+        )
+
+    if (
+        draft.requires_clarification
+        and draft.clarification_index
+        < len(draft.clarification_questions)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "clarification_required",
+                "message": (
+                    "Ответьте на уточнения перед запуском"
+                ),
+                "current_draft": (
+                    _research_draft_payload(draft)
+                ),
+            },
         )
 
     if body.revision != draft.revision:
