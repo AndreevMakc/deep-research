@@ -35,6 +35,7 @@ from app.db.models import (
     Claim,
     IdempotencyRecord,
     ResearchDraft,
+    ResearchDraftMaterial,
     ResearchDraftStatus,
     ResearchRun,
     ResearchRunView,
@@ -76,6 +77,15 @@ from app.research_drafts import (
     build_clarification_questions,
     interpret_research_question,
     refine_interpretation_with_answers,
+)
+from app.research_inputs import (
+    ADVANCED_SETTING_FIELDS,
+    default_research_settings,
+    effective_research_settings,
+    prepare_material,
+    remove_material_file,
+    store_material_file,
+    validate_material_role,
 )
 from app.webhooks import (
     enqueue_webhook_event,
@@ -120,6 +130,79 @@ class AnswerClarificationRequest(BaseModel):
         max_length=500,
     )
     skipped: bool = False
+
+
+class CreateResearchMaterialRequest(BaseModel):
+    revision: int = Field(ge=1)
+    kind: Literal["url", "note", "file"]
+    role: Literal[
+        "verify",
+        "primary_source",
+        "context_only",
+        "do_not_cite",
+    ] = "verify"
+    url: str | None = Field(
+        default=None,
+        max_length=2_048,
+    )
+    text: str | None = Field(
+        default=None,
+        max_length=1_000_000,
+    )
+    filename: str | None = Field(
+        default=None,
+        max_length=255,
+    )
+    mime_type: str | None = Field(
+        default=None,
+        max_length=100,
+    )
+    content_base64: str | None = Field(
+        default=None,
+        max_length=35_000_000,
+    )
+
+
+class DeleteResearchMaterialRequest(BaseModel):
+    revision: int = Field(ge=1)
+
+
+class UpdateResearchSettingsRequest(BaseModel):
+    revision: int = Field(ge=1)
+    period: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=255,
+    )
+    geography: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=255,
+    )
+    languages: list[str] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=10,
+    )
+    source_types: list[str] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=10,
+    )
+    report_format: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=255,
+    )
+    reset_fields: list[
+        Literal[
+            "period",
+            "geography",
+            "languages",
+            "source_types",
+            "report_format",
+        ]
+    ] = Field(default_factory=list, max_length=5)
 
 
 class UpdateRunRequest(BaseModel):
@@ -298,6 +381,10 @@ def _identity_payload(identity: ApiIdentity) -> dict:
             "publish": "publish" in permissions,
             "manage_accounts": (
                 "manage_identities" in permissions
+            ),
+            "manage_research_settings": (
+                "manage_research_settings"
+                in permissions
             ),
         },
     }
@@ -515,6 +602,14 @@ def _research_draft_payload(
         if clarification_pending
         else None
     )
+    auto_settings = (
+        dict(draft.auto_settings)
+        if draft.auto_settings
+        else default_research_settings(draft.period)
+    )
+    settings_overrides = dict(
+        draft.settings_overrides
+    )
     return {
         "id": str(draft.id),
         "question": draft.question,
@@ -537,6 +632,18 @@ def _research_draft_payload(
             "current_question": current_question,
             "answers": clarification_answers,
         },
+        "materials": [
+            _research_material_payload(material)
+            for material in draft.materials
+        ],
+        "settings": {
+            "auto": auto_settings,
+            "overrides": settings_overrides,
+            "effective": effective_research_settings(
+                auto_settings,
+                settings_overrides,
+            ),
+        },
         "status": draft.status.value,
         "run_id": (
             str(draft.run_id)
@@ -546,6 +653,77 @@ def _research_draft_payload(
         "created_at": draft.created_at.isoformat(),
         "updated_at": draft.updated_at.isoformat(),
     }
+
+
+def _research_material_payload(
+    material: ResearchDraftMaterial,
+    *,
+    include_content: bool = False,
+) -> dict:
+    result = {
+        "id": str(material.id),
+        "kind": material.kind,
+        "role": material.role,
+        "name": material.name,
+        "url": material.url,
+        "mime_type": material.mime_type,
+        "content_hash": material.content_hash,
+        "byte_size": material.byte_size,
+        "preview": (
+            material.text_content[:160]
+            if material.text_content
+            else None
+        ),
+        "created_at": material.created_at.isoformat(),
+    }
+
+    if include_content:
+        result["text_content"] = material.text_content
+        result["storage_path"] = material.storage_path
+
+    return result
+
+
+def _research_input_snapshot(
+    draft: ResearchDraft,
+) -> dict:
+    auto_settings = (
+        dict(draft.auto_settings)
+        if draft.auto_settings
+        else default_research_settings(draft.period)
+    )
+    overrides = dict(draft.settings_overrides)
+    return {
+        "draft_id": str(draft.id),
+        "draft_revision": draft.revision,
+        "materials": [
+            _research_material_payload(
+                material,
+                include_content=True,
+            )
+            for material in draft.materials
+        ],
+        "settings": {
+            "auto": auto_settings,
+            "overrides": overrides,
+            "effective": effective_research_settings(
+                auto_settings,
+                overrides,
+            ),
+        },
+    }
+
+
+def _sync_draft_auto_period(
+    draft: ResearchDraft,
+) -> None:
+    auto_settings = (
+        dict(draft.auto_settings)
+        if draft.auto_settings
+        else default_research_settings(draft.period)
+    )
+    auto_settings["period"] = draft.period
+    draft.auto_settings = auto_settings
 
 
 def _raise_draft_revision_conflict(
@@ -582,6 +760,7 @@ def _apply_draft_interpretation(
     draft.estimated_duration_minutes = (
         interpretation.estimated_duration_minutes
     )
+    _sync_draft_auto_period(draft)
 
 
 def _apply_completed_clarifications(
@@ -603,6 +782,7 @@ def _apply_completed_clarifications(
     draft.estimated_duration_minutes = (
         refined.estimated_duration_minutes
     )
+    _sync_draft_auto_period(draft)
 
 
 def _create_run_records(
@@ -610,6 +790,7 @@ def _create_run_records(
     *,
     identity: ApiIdentity,
     question: str,
+    research_input: dict | None = None,
 ) -> tuple[ResearchRun, WorkItem, dict]:
     settings = get_settings()
     title = generate_run_title(question)
@@ -632,7 +813,10 @@ def _create_run_records(
         run_id=run.id,
         kind="execute_research_run",
         status=WorkStatus.QUEUED,
-        payload={"run_id": str(run.id)},
+        payload={
+            "run_id": str(run.id),
+            "research_input": research_input or {},
+        },
         attempts=0,
         max_attempts=3,
         cancel_requested=False,
@@ -1126,10 +1310,300 @@ def update_research_draft(
     draft.scope = scope
     draft.period = period
     draft.assumptions = assumptions
+    _sync_draft_auto_period(draft)
     draft.revision += 1
     draft.updated_at = datetime.now(timezone.utc)
     session.commit()
     session.refresh(draft)
+    return _research_draft_payload(draft)
+
+
+@app.post(
+    "/api/v1/research-drafts/{draft_id}/materials",
+    status_code=status.HTTP_201_CREATED,
+)
+def create_research_draft_material(
+    draft_id: uuid.UUID,
+    body: CreateResearchMaterialRequest,
+    idempotency_key: IdempotencyKey,
+    identity: IdentityDependency,
+    session: SessionDependency,
+):
+    _require(identity, "create_run")
+    draft = _owned_research_draft(
+        session,
+        identity,
+        draft_id,
+        for_update=True,
+    )
+    request_hash = _request_hash(
+        "create_research_draft_material",
+        {
+            "draft_id": str(draft.id),
+            **body.model_dump(),
+        },
+    )
+    cached = _cached_idempotency(
+        session,
+        identity=identity,
+        key=idempotency_key,
+        request_hash=request_hash,
+    )
+
+    if cached is not None:
+        return cached
+
+    if draft.status != ResearchDraftStatus.DRAFT:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Материалы подтверждённого черновика "
+                "нельзя изменить"
+            ),
+        )
+
+    if body.revision != draft.revision:
+        _raise_draft_revision_conflict(draft)
+
+    settings = get_settings()
+
+    if len(draft.materials) >= settings.max_input_materials:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                "Достигнут лимит материалов для черновика"
+            ),
+        )
+
+    try:
+        role = validate_material_role(body.role)
+        prepared = prepare_material(
+            kind=body.kind,
+            url=body.url,
+            text=body.text,
+            filename=body.filename,
+            mime_type=body.mime_type,
+            content_base64=body.content_base64,
+            max_file_bytes=settings.max_input_file_bytes,
+            max_text_bytes=settings.max_input_text_bytes,
+        )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(error),
+        ) from error
+
+    duplicate = session.scalar(
+        select(ResearchDraftMaterial.id).where(
+            ResearchDraftMaterial.draft_id == draft.id,
+            ResearchDraftMaterial.content_hash
+            == prepared.content_hash,
+        )
+    )
+
+    if duplicate is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Этот материал уже добавлен",
+        )
+
+    material = ResearchDraftMaterial(
+        id=uuid.uuid4(),
+        tenant_id=identity.tenant_id,
+        draft=draft,
+        kind=prepared.kind,
+        role=role,
+        name=prepared.name,
+        url=prepared.url,
+        text_content=prepared.text_content,
+        mime_type=prepared.mime_type,
+        content_hash=prepared.content_hash,
+        byte_size=prepared.byte_size,
+        storage_path=None,
+    )
+
+    if prepared.content is not None:
+        material.storage_path = store_material_file(
+            tenant_id=identity.tenant_id,
+            draft_id=draft.id,
+            material_id=material.id,
+            extension=prepared.extension or "",
+            content=prepared.content,
+        )
+
+    try:
+        session.add(material)
+        draft.revision += 1
+        draft.updated_at = datetime.now(timezone.utc)
+        session.flush()
+        result = _research_draft_payload(draft)
+        _store_idempotency(
+            session,
+            identity=identity,
+            key=idempotency_key,
+            request_hash=request_hash,
+            response_json=result,
+            status_code=status.HTTP_201_CREATED,
+        )
+        session.commit()
+    except Exception:
+        session.rollback()
+        remove_material_file(material.storage_path)
+        raise
+
+    return result
+
+
+@app.delete(
+    (
+        "/api/v1/research-drafts/{draft_id}"
+        "/materials/{material_id}"
+    ),
+)
+def delete_research_draft_material(
+    draft_id: uuid.UUID,
+    material_id: uuid.UUID,
+    body: DeleteResearchMaterialRequest,
+    identity: IdentityDependency,
+    session: SessionDependency,
+) -> dict:
+    _require(identity, "create_run")
+    draft = _owned_research_draft(
+        session,
+        identity,
+        draft_id,
+        for_update=True,
+    )
+
+    if draft.status != ResearchDraftStatus.DRAFT:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Материалы подтверждённого черновика "
+                "нельзя удалить"
+            ),
+        )
+
+    if body.revision != draft.revision:
+        _raise_draft_revision_conflict(draft)
+
+    material = session.scalar(
+        select(ResearchDraftMaterial).where(
+            ResearchDraftMaterial.id == material_id,
+            ResearchDraftMaterial.draft_id == draft.id,
+            ResearchDraftMaterial.tenant_id
+            == identity.tenant_id,
+        )
+    )
+
+    if material is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Материал не найден",
+        )
+
+    storage_path = material.storage_path
+    draft.materials.remove(material)
+    draft.revision += 1
+    draft.updated_at = datetime.now(timezone.utc)
+    session.commit()
+    remove_material_file(storage_path)
+    return _research_draft_payload(draft)
+
+
+@app.patch(
+    "/api/v1/research-drafts/{draft_id}/settings"
+)
+def update_research_draft_settings(
+    draft_id: uuid.UUID,
+    body: UpdateResearchSettingsRequest,
+    identity: IdentityDependency,
+    session: SessionDependency,
+) -> dict:
+    _require(identity, "manage_research_settings")
+    draft = _owned_research_draft(
+        session,
+        identity,
+        draft_id,
+        for_update=True,
+    )
+
+    if draft.status != ResearchDraftStatus.DRAFT:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Настройки подтверждённого черновика "
+                "нельзя изменить"
+            ),
+        )
+
+    if body.revision != draft.revision:
+        _raise_draft_revision_conflict(draft)
+
+    overrides = dict(draft.settings_overrides)
+    reset_fields = set(body.reset_fields)
+
+    if not reset_fields <= ADVANCED_SETTING_FIELDS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Неизвестная настройка для сброса",
+        )
+
+    for field in reset_fields:
+        overrides.pop(field, None)
+
+    for field in ADVANCED_SETTING_FIELDS:
+        if field not in body.model_fields_set:
+            continue
+
+        value = getattr(body, field)
+
+        if value is None:
+            overrides.pop(field, None)
+            continue
+
+        if isinstance(value, list):
+            cleaned = [
+                item.strip()
+                for item in value
+                if item.strip()
+            ]
+
+            if (
+                not cleaned
+                or any(len(item) > 100 for item in cleaned)
+            ):
+                raise HTTPException(
+                    status_code=(
+                        status.HTTP_422_UNPROCESSABLE_CONTENT
+                    ),
+                    detail=(
+                        "Список настроек содержит "
+                        "некорректные значения"
+                    ),
+                )
+
+            overrides[field] = cleaned
+        else:
+            cleaned_value = value.strip()
+
+            if not cleaned_value:
+                raise HTTPException(
+                    status_code=(
+                        status.HTTP_422_UNPROCESSABLE_CONTENT
+                    ),
+                    detail="Настройка не может быть пустой",
+                )
+
+            overrides[field] = cleaned_value
+
+    if overrides != draft.settings_overrides:
+        draft.settings_overrides = overrides
+        draft.revision += 1
+        draft.updated_at = datetime.now(timezone.utc)
+        session.commit()
+        session.refresh(draft)
+
     return _research_draft_payload(draft)
 
 
@@ -1336,6 +1810,7 @@ def confirm_research_draft(
         session,
         identity=identity,
         question=draft.question,
+        research_input=_research_input_snapshot(draft),
     )
     result["draft_revision"] = draft.revision
     draft.status = ResearchDraftStatus.CONFIRMED
@@ -1589,8 +2064,20 @@ def get_provenance(
     _require(identity, "view_provenance")
     run = _tenant_run(session, identity, run_id)
     report = get_research_report(session, run.id)
+    work_item = session.scalar(
+        select(WorkItem).where(
+            WorkItem.run_id == run.id,
+            WorkItem.tenant_id == identity.tenant_id,
+            WorkItem.kind == "execute_research_run",
+        )
+    )
     return {
         "run_id": str(run.id),
+        "research_input": (
+            work_item.payload.get("research_input", {})
+            if work_item is not None
+            else None
+        ),
         "tasks": [
             {
                 "id": str(task.id),

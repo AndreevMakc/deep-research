@@ -427,6 +427,105 @@ class DashboardBrowserTests(unittest.TestCase):
             self.assertEqual(draft.scope, unsaved_scope)
             self.assertEqual(draft.revision, 3)
 
+    def test_materials_and_advanced_settings_reach_run(
+        self,
+    ) -> None:
+        self._login()
+        self.page.locator("#question").fill(
+            "Сравнить PostgreSQL и MySQL для российских "
+            "B2B-команд за 2025 год по стоимости "
+            "владения и безопасности."
+        )
+        self.page.get_by_role(
+            "button",
+            name="Продолжить",
+        ).click()
+        expect(
+            self.page.locator("#draft-card")
+        ).to_be_visible()
+
+        self.page.locator("#material-text").fill(
+            "Внутренний контекст для планирования"
+        )
+        self.page.locator(
+            "#material-text-form button"
+        ).click()
+        expect(
+            self.page.locator("#material-list")
+        ).to_contain_text("Вставленный текст")
+        expect(
+            self.page.locator("#material-list")
+        ).to_contain_text("проверить независимо")
+
+        self.page.locator("#material-url").fill(
+            "https://example.com/primary"
+        )
+        self.page.locator("#material-role").select_option(
+            "primary_source"
+        )
+        self.page.locator(
+            "#material-url-form button"
+        ).click()
+        expect(
+            self.page.locator("#material-list")
+        ).to_contain_text("первичный источник")
+
+        self.page.locator(
+            ".material-item",
+            has_text="Вставленный текст",
+        ).get_by_role(
+            "button",
+            name="Удалить",
+        ).click()
+        expect(
+            self.page.locator("#material-list")
+        ).not_to_contain_text("Вставленный текст")
+
+        expect(
+            self.page.locator("#advanced-settings")
+        ).to_be_visible()
+        self.page.locator(
+            "#advanced-settings summary"
+        ).click()
+        self.page.locator("#settings-geography").fill(
+            "Россия"
+        )
+        self.page.locator(
+            "#settings-form .primary-button"
+        ).click()
+        expect(
+            self.page.locator("#settings-overrides")
+        ).to_contain_text("geography")
+
+        self.page.get_by_role(
+            "button",
+            name="Начать исследование",
+        ).click()
+        expect(self.page.locator(".run-card")).to_have_count(1)
+
+        with SessionFactory() as session:
+            work_item = session.scalar(
+                select(WorkItem).where(
+                    WorkItem.tenant_id == self.tenant_id
+                )
+            )
+            self.assertIsNotNone(work_item)
+            research_input = work_item.payload[
+                "research_input"
+            ]
+            self.assertEqual(
+                len(research_input["materials"]),
+                1,
+            )
+            self.assertEqual(
+                research_input["materials"][0]["role"],
+                "primary_source",
+            )
+            self.assertEqual(
+                research_input["settings"]["overrides"],
+                {"geography": "Россия"},
+            )
+
     def test_clarification_progress_recovers_after_reload(
         self,
     ) -> None:

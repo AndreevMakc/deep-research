@@ -2,6 +2,8 @@ import sys
 import uuid
 from datetime import datetime, timezone
 
+from sqlalchemy import select
+
 from app.checkpoint import postgres_checkpointer
 from app.config import get_settings
 from app.db.models import (
@@ -10,6 +12,7 @@ from app.db.models import (
     ResearchRun,
     RunStatus,
     TaskStatus,
+    WorkItem,
 )
 from app.db.repositories import (
     create_research_run,
@@ -120,6 +123,7 @@ def main() -> int:
         question = "Как многоагентные системы улучшают deep research?"
 
     run_id = None
+    research_input: dict = {}
     final_status: RunStatus | None = None
 
     try:
@@ -148,6 +152,21 @@ def main() -> int:
                     session=session,
                     run_id=resume_run_id,
                 )
+                work_item = session.scalar(
+                    select(WorkItem).where(
+                        WorkItem.run_id == resume_run_id,
+                        WorkItem.kind
+                        == "execute_research_run",
+                    )
+                )
+
+                if work_item is not None:
+                    research_input = dict(
+                        work_item.payload.get(
+                            "research_input",
+                            {},
+                        )
+                    )
 
             if research_run is None:
                 print(
@@ -175,6 +194,7 @@ def main() -> int:
         initial_state = {
             "run_id": str(run_id),
             "question": question,
+            "research_input": research_input,
             "plan": {},
             "task_ids": [],
             "findings": [],

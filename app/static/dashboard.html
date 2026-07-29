@@ -26,7 +26,7 @@
       background: var(--paper);
       color: var(--ink);
     }
-    button, input, textarea { font: inherit; }
+    button, input, textarea, select { font: inherit; }
     button { cursor: pointer; }
     button:focus-visible, input:focus-visible, textarea:focus-visible {
       outline: 3px solid rgba(23, 107, 74, .25);
@@ -82,7 +82,7 @@
       font-weight: 500;
     }
     label { display: grid; gap: 7px; margin: 16px 0; font-size: .88rem; }
-    input, textarea {
+    input, textarea, select {
       width: 100%;
       border: 1px solid #bdc8c1;
       border-radius: 11px;
@@ -186,6 +186,44 @@
       text-transform: uppercase;
     }
     .draft-field ul { margin: 6px 0 0; padding-left: 20px; }
+    .input-panel {
+      margin-top: 20px;
+      border-top: 1px solid var(--line);
+      padding-top: 18px;
+    }
+    .input-panel h4 { margin: 0 0 8px; font-size: 1rem; }
+    .material-toolbar {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: end;
+    }
+    .material-toolbar label { margin: 8px 0; }
+    .material-list { display: grid; gap: 8px; margin-top: 12px; }
+    .material-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px 12px;
+      background: #fff;
+    }
+    .material-item div { min-width: 0; flex: 1; }
+    .material-item strong,
+    .material-item span { display: block; overflow-wrap: anywhere; }
+    .material-item span { color: var(--muted); font-size: .78rem; }
+    .advanced-settings summary {
+      cursor: pointer;
+      color: var(--green);
+      font-weight: 700;
+    }
+    .settings-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0 12px;
+    }
+    .override-note { color: var(--amber); font-size: .78rem; }
     .clarification-progress {
       color: var(--muted);
       font-size: .84rem;
@@ -383,7 +421,7 @@
           placeholder="Сформулируйте вопрос, решение или гипотезу…"
           aria-label="Вопрос исследования" required></textarea>
         <div class="composer-actions">
-          <span class="material-note">Материалы подключим в следующем этапе</span>
+          <span class="material-note">Материалы можно добавить перед запуском</span>
           <button id="prepare-research" class="primary-button" type="submit">
             Продолжить
           </button>
@@ -448,6 +486,83 @@
             <ul id="draft-assumptions"></ul>
           </div>
         </div>
+        <section class="input-panel" aria-labelledby="materials-heading">
+          <h4 id="materials-heading">Материалы для исследования</h4>
+          <p class="muted small">
+            По умолчанию материалы проверяются независимо. Можно добавить
+            ссылку, текст, PDF, TXT или Markdown.
+          </p>
+          <label>Как использовать материал
+            <select id="material-role">
+              <option value="verify">Проверить независимо</option>
+              <option value="primary_source">Первичный источник</option>
+              <option value="context_only">Только контекст</option>
+              <option value="do_not_cite">Не цитировать</option>
+            </select>
+          </label>
+          <form id="material-url-form" class="material-toolbar">
+            <label>Ссылка
+              <input id="material-url" type="url"
+                placeholder="https://example.com/report">
+            </label>
+            <button class="quiet-button" type="submit">Добавить</button>
+          </form>
+          <form id="material-text-form" class="material-toolbar">
+            <label>Вставленный текст
+              <textarea id="material-text" maxlength="100000"
+                placeholder="Фрагмент документа или заметка"></textarea>
+            </label>
+            <button class="quiet-button" type="submit">Добавить</button>
+          </form>
+          <form id="material-file-form" class="material-toolbar">
+            <label>Файл
+              <input id="material-file" type="file"
+                accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown">
+            </label>
+            <button class="quiet-button" type="submit">Загрузить</button>
+          </form>
+          <p id="material-message" class="error small" role="alert"></p>
+          <div id="material-list" class="material-list"></div>
+          <p class="muted small">
+            Вложения могут обрабатываться внешними AI-провайдерами в рамках
+            выполнения исследования. Не добавляйте секреты и персональные
+            данные без разрешения.
+          </p>
+        </section>
+        <details id="advanced-settings" class="input-panel advanced-settings"
+          hidden>
+          <summary>Расширенные настройки</summary>
+          <p class="muted small">
+            Доступно администратору. Изменённые вручную поля помечаются ниже.
+          </p>
+          <form id="settings-form">
+            <div class="settings-grid">
+              <label>Период
+                <input id="settings-period" maxlength="255">
+              </label>
+              <label>География
+                <input id="settings-geography" maxlength="255">
+              </label>
+              <label>Языки — через запятую
+                <input id="settings-languages" maxlength="1000">
+              </label>
+              <label>Типы источников — через запятую
+                <input id="settings-source-types" maxlength="1000">
+              </label>
+              <label>Формат отчёта
+                <input id="settings-report-format" maxlength="255">
+              </label>
+            </div>
+            <p id="settings-overrides" class="override-note"></p>
+            <p id="settings-message" class="error small" role="alert"></p>
+            <div class="draft-actions">
+              <button id="reset-settings" class="quiet-button" type="button">
+                Вернуть авто
+              </button>
+              <button class="primary-button" type="submit">Сохранить</button>
+            </div>
+          </form>
+        </details>
         <div class="draft-actions">
           <button id="edit-draft" class="quiet-button" type="button">
             Изменить детали
@@ -530,6 +645,18 @@
     const draftPeriodInput = document.querySelector("#draft-period-input");
     const draftAssumptionsInput =
       document.querySelector("#draft-assumptions-input");
+    const materialRole = document.querySelector("#material-role");
+    const materialMessage = document.querySelector("#material-message");
+    const materialList = document.querySelector("#material-list");
+    const advancedSettings = document.querySelector("#advanced-settings");
+    const settingsMessage = document.querySelector("#settings-message");
+    const settingFields = {
+      period: document.querySelector("#settings-period"),
+      geography: document.querySelector("#settings-geography"),
+      languages: document.querySelector("#settings-languages"),
+      source_types: document.querySelector("#settings-source-types"),
+      report_format: document.querySelector("#settings-report-format")
+    };
     let currentIdentity = null;
     let csrfCookieName = "dr_csrf";
     let allRuns = [];
@@ -676,6 +803,76 @@
       clarificationAnswer.focus();
     }
 
+    const materialRoleLabels = {
+      verify: "проверить независимо",
+      primary_source: "первичный источник",
+      context_only: "только контекст",
+      do_not_cite: "не цитировать"
+    };
+
+    function renderMaterials(draft) {
+      materialMessage.textContent = "";
+      materialList.replaceChildren();
+      for (const material of draft.materials) {
+        const item = element("div", undefined, "material-item");
+        const description = element("div");
+        description.append(
+          element("strong", material.name),
+          element(
+            "span",
+            `${materialRoleLabels[material.role]} · ${material.kind}`
+          )
+        );
+        const remove = element("button", "Удалить", "quiet-button");
+        remove.type = "button";
+        remove.addEventListener("click", async () => {
+          remove.disabled = true;
+          try {
+            const updated = await request(
+              `/api/v1/research-drafts/${draft.id}/materials/${material.id}`,
+              {
+                method: "DELETE",
+                body: JSON.stringify({revision: activeDraft.revision})
+              }
+            );
+            renderDraft(updated);
+          } catch (error) {
+            materialMessage.textContent =
+              `${material.name}: ${error.message}`;
+            remove.disabled = false;
+          }
+        });
+        item.append(description, remove);
+        materialList.append(item);
+      }
+      if (!draft.materials.length) {
+        materialList.append(
+          element("p", "Материалы пока не добавлены.", "muted small")
+        );
+      }
+    }
+
+    function settingsList(value) {
+      return Array.isArray(value) ? value.join(", ") : value;
+    }
+
+    function renderSettings(draft) {
+      const canManage =
+        Boolean(currentIdentity?.capabilities?.manage_research_settings);
+      advancedSettings.hidden = !canManage;
+      if (!canManage) return;
+
+      settingsMessage.textContent = "";
+      for (const [name, node] of Object.entries(settingFields)) {
+        node.value = settingsList(draft.settings.effective[name]);
+      }
+      const overridden = Object.keys(draft.settings.overrides);
+      document.querySelector("#settings-overrides").textContent =
+        overridden.length
+          ? `Изменено вручную: ${overridden.join(", ")}`
+          : "Все значения подобраны автоматически.";
+    }
+
     function renderDraft(draft) {
       activeDraft = draft;
       questionNode.value = draft.question;
@@ -695,6 +892,8 @@
       for (const assumption of draft.assumptions) {
         assumptions.append(element("li", assumption));
       }
+      renderMaterials(draft);
+      renderSettings(draft);
       researchForm.hidden = true;
       examplesNode.hidden = true;
       clarificationCard.hidden = true;
@@ -1054,6 +1253,156 @@
         submit.textContent = "Сохранить детали";
       }
     });
+
+    async function submitMaterial(payload, form, button) {
+      if (!activeDraft) return;
+      materialMessage.textContent = "";
+      button.disabled = true;
+      try {
+        const updated = await request(
+          `/api/v1/research-drafts/${activeDraft.id}/materials`,
+          {
+            method: "POST",
+            idempotent: true,
+            body: JSON.stringify({
+              revision: activeDraft.revision,
+              role: materialRole.value,
+              ...payload
+            })
+          }
+        );
+        form.reset();
+        renderDraft(updated);
+      } catch (error) {
+        const name = payload.filename || payload.url || "Материал";
+        materialMessage.textContent = `${name}: ${error.message}`;
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    document.querySelector("#material-url-form").addEventListener(
+      "submit",
+      async event => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        await submitMaterial(
+          {kind: "url", url: document.querySelector("#material-url").value},
+          form,
+          form.querySelector("button")
+        );
+      }
+    );
+
+    document.querySelector("#material-text-form").addEventListener(
+      "submit",
+      async event => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        await submitMaterial(
+          {kind: "note", text: document.querySelector("#material-text").value},
+          form,
+          form.querySelector("button")
+        );
+      }
+    );
+
+    document.querySelector("#material-file-form").addEventListener(
+      "submit",
+      async event => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const input = document.querySelector("#material-file");
+        const file = input.files[0];
+        if (!file) {
+          materialMessage.textContent = "Выберите PDF, TXT или Markdown.";
+          return;
+        }
+        const dataUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.addEventListener("load", () => resolve(reader.result));
+          reader.addEventListener("error", () => reject(reader.error));
+          reader.readAsDataURL(file);
+        });
+        await submitMaterial(
+          {
+            kind: "file",
+            filename: file.name,
+            mime_type: file.type || "application/octet-stream",
+            content_base64: String(dataUrl).split(",", 2)[1]
+          },
+          form,
+          form.querySelector("button")
+        );
+      }
+    );
+
+    document.querySelector("#settings-form").addEventListener(
+      "submit",
+      async event => {
+        event.preventDefault();
+        if (!activeDraft) return;
+        const submit = event.currentTarget.querySelector(".primary-button");
+        settingsMessage.textContent = "";
+        submit.disabled = true;
+        try {
+          const payload = {
+            revision: activeDraft.revision,
+            reset_fields: []
+          };
+          for (const [name, node] of Object.entries(settingFields)) {
+            const value = ["languages", "source_types"].includes(name)
+              ? node.value.split(",")
+                .map(item => item.trim()).filter(Boolean)
+              : node.value.trim();
+            const automatic = activeDraft.settings.auto[name];
+            if (JSON.stringify(value) === JSON.stringify(automatic)) {
+              payload.reset_fields.push(name);
+            } else {
+              payload[name] = value;
+            }
+          }
+          const updated = await request(
+            `/api/v1/research-drafts/${activeDraft.id}/settings`,
+            {
+              method: "PATCH",
+              body: JSON.stringify(payload)
+            }
+          );
+          renderDraft(updated);
+        } catch (error) {
+          settingsMessage.textContent = error.message;
+        } finally {
+          submit.disabled = false;
+        }
+      }
+    );
+
+    document.querySelector("#reset-settings").addEventListener(
+      "click",
+      async event => {
+        if (!activeDraft) return;
+        event.currentTarget.disabled = true;
+        settingsMessage.textContent = "";
+        try {
+          const updated = await request(
+            `/api/v1/research-drafts/${activeDraft.id}/settings`,
+            {
+              method: "PATCH",
+              body: JSON.stringify({
+                revision: activeDraft.revision,
+                reset_fields: Object.keys(settingFields)
+              })
+            }
+          );
+          renderDraft(updated);
+        } catch (error) {
+          settingsMessage.textContent = error.message;
+        } finally {
+          event.currentTarget.disabled = false;
+        }
+      }
+    );
 
     document.querySelector("#confirm-draft").addEventListener("click", async () => {
       if (!activeDraft) return;

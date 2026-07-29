@@ -401,6 +401,20 @@ class ResearchDraft(Base):
         server_default="0",
     )
 
+    auto_settings: Mapped[dict] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default="{}",
+    )
+
+    settings_overrides: Mapped[dict] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default="{}",
+    )
+
     revision: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
@@ -430,6 +444,119 @@ class ResearchDraft(Base):
         server_default=func.now(),
         onupdate=func.now(),
         index=True,
+    )
+
+    materials: Mapped[
+        list["ResearchDraftMaterial"]
+    ] = relationship(
+        back_populates="draft",
+        cascade="all, delete-orphan",
+        order_by="ResearchDraftMaterial.created_at",
+    )
+
+
+class ResearchDraftMaterial(Base):
+    __tablename__ = "research_draft_materials"
+    __table_args__ = (
+        CheckConstraint(
+            (
+                "kind IN "
+                "('url', 'pdf', 'text', 'markdown', 'note')"
+            ),
+            name="ck_research_draft_material_kind",
+        ),
+        CheckConstraint(
+            (
+                "role IN "
+                "('verify', 'primary_source', "
+                "'context_only', 'do_not_cite')"
+            ),
+            name="ck_research_draft_material_role",
+        ),
+        CheckConstraint(
+            "byte_size >= 0",
+            name=(
+                "ck_research_draft_material_"
+                "size_nonnegative"
+            ),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    draft_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey(
+            "research_drafts.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    kind: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+    )
+
+    role: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+    )
+
+    name: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    url: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    text_content: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    mime_type: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+
+    content_hash: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        index=True,
+    )
+
+    byte_size: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    storage_path: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    draft: Mapped["ResearchDraft"] = relationship(
+        back_populates="materials"
     )
 
 
