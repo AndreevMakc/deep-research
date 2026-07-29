@@ -232,6 +232,56 @@ class DashboardBrowserTests(unittest.TestCase):
             self.page.locator("#draft-scope")
         ).to_contain_text(question)
 
+        self.page.get_by_role(
+            "button",
+            name="Изменить детали",
+        ).click()
+        expect(
+            self.page.locator("#draft-edit-form")
+        ).to_be_visible()
+        self.page.get_by_role(
+            "button",
+            name="Вернуться",
+        ).click()
+        expect(
+            self.page.locator("#draft-card")
+        ).to_be_visible()
+
+        edited_scope = (
+            "Сравнить варианты для небольшой команды"
+        )
+        edited_period = "Данные за последние два года"
+        edited_assumptions = [
+            "Команда работает удалённо",
+            "Важна стоимость владения",
+        ]
+        self.page.get_by_role(
+            "button",
+            name="Изменить детали",
+        ).click()
+        self.page.locator("#draft-scope-input").fill(
+            edited_scope
+        )
+        self.page.locator("#draft-period-input").fill(
+            edited_period
+        )
+        self.page.locator(
+            "#draft-assumptions-input"
+        ).fill("\n".join(edited_assumptions))
+        self.page.get_by_role(
+            "button",
+            name="Сохранить детали",
+        ).click()
+        expect(
+            self.page.locator("#draft-card")
+        ).to_be_visible()
+        expect(
+            self.page.locator("#draft-scope")
+        ).to_have_text(edited_scope)
+        expect(
+            self.page.locator("#draft-period")
+        ).to_have_text(edited_period)
+
         with SessionFactory() as session:
             self.assertEqual(
                 session.scalar(
@@ -262,6 +312,12 @@ class DashboardBrowserTests(unittest.TestCase):
         expect(
             self.page.locator("#draft-question")
         ).to_have_text(question)
+        expect(
+            self.page.locator("#draft-scope")
+        ).to_have_text(edited_scope)
+        expect(
+            self.page.locator("#draft-assumptions")
+        ).to_contain_text(edited_assumptions[1])
 
         self.page.get_by_role(
             "button",
@@ -294,6 +350,78 @@ class DashboardBrowserTests(unittest.TestCase):
                 ),
                 1,
             )
+
+    def test_edit_conflict_keeps_unsaved_values(
+        self,
+    ) -> None:
+        self._login()
+        self.page.locator("#question").fill(
+            "Как выбрать формат исследования?"
+        )
+        self.page.get_by_role(
+            "button",
+            name="Продолжить",
+        ).click()
+        expect(
+            self.page.locator("#draft-card")
+        ).to_be_visible()
+        self.page.get_by_role(
+            "button",
+            name="Изменить детали",
+        ).click()
+
+        unsaved_scope = "Пользовательская версия охвата"
+        self.page.locator("#draft-scope-input").fill(
+            unsaved_scope
+        )
+
+        with SessionFactory() as session:
+            draft = session.scalar(
+                select(ResearchDraft).where(
+                    ResearchDraft.tenant_id
+                    == self.tenant_id
+                )
+            )
+            self.assertIsNotNone(draft)
+            draft.scope = "Изменение из другой вкладки"
+            draft.revision += 1
+            session.commit()
+
+        self.page.get_by_role(
+            "button",
+            name="Сохранить детали",
+        ).click()
+        expect(self.page.locator("#message")).to_contain_text(
+            "изменён в другой вкладке"
+        )
+        expect(
+            self.page.locator("#draft-edit-form")
+        ).to_be_visible()
+        expect(
+            self.page.locator("#draft-scope-input")
+        ).to_have_value(unsaved_scope)
+
+        self.page.get_by_role(
+            "button",
+            name="Сохранить детали",
+        ).click()
+        expect(
+            self.page.locator("#draft-card")
+        ).to_be_visible()
+        expect(
+            self.page.locator("#draft-scope")
+        ).to_have_text(unsaved_scope)
+
+        with SessionFactory() as session:
+            draft = session.scalar(
+                select(ResearchDraft).where(
+                    ResearchDraft.tenant_id
+                    == self.tenant_id
+                )
+            )
+            self.assertIsNotNone(draft)
+            self.assertEqual(draft.scope, unsaved_scope)
+            self.assertEqual(draft.revision, 3)
 
     def test_draft_error_is_visible_without_creating_run(
         self,

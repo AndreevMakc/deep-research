@@ -5,6 +5,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    CheckConstraint,
     DateTime,
     Enum,
     Float,
@@ -300,6 +301,10 @@ class ResearchDraft(Base):
             "run_id",
             name="uq_research_draft_run",
         ),
+        CheckConstraint(
+            "revision >= 1",
+            name="ck_research_drafts_revision_positive",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -356,6 +361,13 @@ class ResearchDraft(Base):
     estimated_duration_minutes: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
+    )
+
+    revision: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default="1",
     )
 
     status: Mapped[ResearchDraftStatus] = mapped_column(

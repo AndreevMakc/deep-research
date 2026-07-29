@@ -186,6 +186,21 @@
       text-transform: uppercase;
     }
     .draft-field ul { margin: 6px 0 0; padding-left: 20px; }
+    .draft-editor {
+      border: 1px solid #b9c6bf;
+      border-radius: 20px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      padding: 24px;
+      text-align: left;
+    }
+    .draft-editor h3 {
+      margin: 4px 0 12px;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 1.65rem;
+      font-weight: 500;
+    }
+    .draft-editor textarea { min-height: 92px; resize: vertical; }
     .draft-actions {
       display: flex;
       justify-content: flex-end;
@@ -396,6 +411,32 @@
           </button>
         </div>
       </section>
+      <form id="draft-edit-form" class="draft-editor" hidden>
+        <p class="eyebrow">Изменить интерпретацию</p>
+        <h3>Уточните детали перед запуском</h3>
+        <p class="muted small">
+          Изменения затрагивают только пользовательскую интерпретацию задачи.
+        </p>
+        <label>Охват
+          <textarea id="draft-scope-input" minlength="3" maxlength="5000"
+            required></textarea>
+        </label>
+        <label>Период
+          <input id="draft-period-input" maxlength="255" required>
+        </label>
+        <label>Допущения — по одному в строке
+          <textarea id="draft-assumptions-input" maxlength="5009"
+            required></textarea>
+        </label>
+        <div class="draft-actions">
+          <button id="cancel-draft-edit" class="quiet-button" type="button">
+            Вернуться
+          </button>
+          <button id="save-draft" class="primary-button" type="submit">
+            Сохранить детали
+          </button>
+        </div>
+      </form>
       <p id="message" class="notice error" role="alert"></p>
     </section>
 
@@ -430,6 +471,11 @@
     const researchForm = document.querySelector("#research-form");
     const examplesNode = document.querySelector(".examples");
     const draftCard = document.querySelector("#draft-card");
+    const draftEditForm = document.querySelector("#draft-edit-form");
+    const draftScopeInput = document.querySelector("#draft-scope-input");
+    const draftPeriodInput = document.querySelector("#draft-period-input");
+    const draftAssumptionsInput =
+      document.querySelector("#draft-assumptions-input");
     let currentIdentity = null;
     let csrfCookieName = "dr_csrf";
     let allRuns = [];
@@ -480,7 +526,15 @@
       const response = await fetch(path, {...options, method, headers});
       const data = response.status === 204 ? null : await response.json();
       if (!response.ok) {
-        throw new Error(data?.detail || "Не удалось выполнить запрос");
+        const detail = data?.detail;
+        const error = new Error(
+          typeof detail === "string"
+            ? detail
+            : detail?.message || "Не удалось выполнить запрос"
+        );
+        error.status = response.status;
+        error.detail = detail;
+        throw error;
       }
       return data;
     }
@@ -524,10 +578,13 @@
 
     function showDraftEditor() {
       draftCard.hidden = true;
-      researchForm.hidden = false;
-      examplesNode.hidden = false;
-      if (activeDraft) questionNode.value = activeDraft.question;
-      questionNode.focus();
+      researchForm.hidden = true;
+      examplesNode.hidden = true;
+      draftEditForm.hidden = false;
+      draftScopeInput.value = activeDraft.scope;
+      draftPeriodInput.value = activeDraft.period;
+      draftAssumptionsInput.value = activeDraft.assumptions.join("\n");
+      draftScopeInput.focus();
     }
 
     function renderDraft(draft) {
@@ -545,6 +602,7 @@
       }
       researchForm.hidden = true;
       examplesNode.hidden = true;
+      draftEditForm.hidden = true;
       draftCard.hidden = false;
     }
 
@@ -555,6 +613,7 @@
       } else {
         activeDraft = null;
         draftCard.hidden = true;
+        draftEditForm.hidden = true;
         researchForm.hidden = false;
         examplesNode.hidden = false;
       }
@@ -783,12 +842,10 @@
       submit.textContent = "Готовим…";
       try {
         const draft = await request(
-          activeDraft
-            ? `/api/v1/research-drafts/${activeDraft.id}`
-            : "/api/v1/research-drafts",
+          "/api/v1/research-drafts",
           {
-            method: activeDraft ? "PATCH" : "POST",
-            idempotent: !activeDraft,
+            method: "POST",
+            idempotent: true,
             body: JSON.stringify({question: questionNode.value})
           }
         );
@@ -806,6 +863,49 @@
       showDraftEditor();
     });
 
+    document.querySelector("#cancel-draft-edit").addEventListener("click", () => {
+      messageNode.textContent = "";
+      if (activeDraft) renderDraft(activeDraft);
+    });
+
+    draftEditForm.addEventListener("submit", async event => {
+      event.preventDefault();
+      if (!activeDraft) return;
+      const submit = document.querySelector("#save-draft");
+      messageNode.textContent = "";
+      submit.disabled = true;
+      submit.textContent = "Сохраняем…";
+      try {
+        const draft = await request(
+          `/api/v1/research-drafts/${activeDraft.id}`,
+          {
+            method: "PATCH",
+            body: JSON.stringify({
+              revision: activeDraft.revision,
+              scope: draftScopeInput.value,
+              period: draftPeriodInput.value,
+              assumptions: draftAssumptionsInput.value
+                .split("\n")
+                .map(value => value.trim())
+                .filter(Boolean)
+            })
+          }
+        );
+        renderDraft(draft);
+      } catch (error) {
+        if (
+          error.status === 409 &&
+          error.detail?.code === "draft_revision_conflict"
+        ) {
+          activeDraft = error.detail.current_draft;
+        }
+        messageNode.textContent = error.message;
+      } finally {
+        submit.disabled = false;
+        submit.textContent = "Сохранить детали";
+      }
+    });
+
     document.querySelector("#confirm-draft").addEventListener("click", async () => {
       if (!activeDraft) return;
       const submit = document.querySelector("#confirm-draft");
@@ -815,11 +915,16 @@
       try {
         const created = await request(
           `/api/v1/research-drafts/${activeDraft.id}/confirm`,
-          {method: "POST", idempotent: true}
+          {
+            method: "POST",
+            idempotent: true,
+            body: JSON.stringify({revision: activeDraft.revision})
+          }
         );
         activeDraft = null;
         questionNode.value = "";
         draftCard.hidden = true;
+        draftEditForm.hidden = true;
         researchForm.hidden = false;
         examplesNode.hidden = false;
         selectedGroup = "active";

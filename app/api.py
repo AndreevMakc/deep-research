@@ -95,7 +95,17 @@ class CreateRunRequest(BaseModel):
 
 
 class UpdateResearchDraftRequest(BaseModel):
-    question: str = Field(min_length=3, max_length=10_000)
+    revision: int = Field(ge=1)
+    scope: str = Field(min_length=3, max_length=5_000)
+    period: str = Field(min_length=1, max_length=255)
+    assumptions: list[str] = Field(
+        min_length=1,
+        max_length=10,
+    )
+
+
+class ConfirmResearchDraftRequest(BaseModel):
+    revision: int = Field(ge=1)
 
 
 class UpdateRunRequest(BaseModel):
@@ -482,6 +492,7 @@ def _research_draft_payload(
         "estimated_duration_minutes": (
             draft.estimated_duration_minutes
         ),
+        "revision": draft.revision,
         "status": draft.status.value,
         "run_id": (
             str(draft.run_id)
@@ -491,6 +502,23 @@ def _research_draft_payload(
         "created_at": draft.created_at.isoformat(),
         "updated_at": draft.updated_at.isoformat(),
     }
+
+
+def _raise_draft_revision_conflict(
+    draft: ResearchDraft,
+) -> None:
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "draft_revision_conflict",
+            "message": (
+                "Черновик изменён в другой вкладке. "
+                "Ваши изменения сохранены в форме; "
+                "проверьте их и сохраните ещё раз."
+            ),
+            "current_draft": _research_draft_payload(draft),
+        },
+    )
 
 
 def _apply_draft_interpretation(
@@ -963,18 +991,48 @@ def update_research_draft(
             detail="Confirmed research draft cannot be changed",
         )
 
-    question = body.question.strip()
+    if body.revision != draft.revision:
+        _raise_draft_revision_conflict(draft)
 
-    if len(question) < 3:
+    scope = body.scope.strip()
+    period = body.period.strip()
+    assumptions = [
+        assumption.strip()
+        for assumption in body.assumptions
+        if assumption.strip()
+    ]
+
+    if len(scope) < 3:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="Question must contain at least 3 characters",
+            detail="Охват должен содержать не менее 3 символов",
         )
 
-    _apply_draft_interpretation(
-        draft,
-        question=question,
-    )
+    if not period:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Укажите период исследования",
+        )
+
+    if not assumptions:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Добавьте хотя бы одно допущение",
+        )
+
+    if any(len(assumption) > 500 for assumption in assumptions):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                "Каждое допущение должно быть "
+                "не длиннее 500 символов"
+            ),
+        )
+
+    draft.scope = scope
+    draft.period = period
+    draft.assumptions = assumptions
+    draft.revision += 1
     draft.updated_at = datetime.now(timezone.utc)
     session.commit()
     session.refresh(draft)
@@ -987,6 +1045,7 @@ def update_research_draft(
 )
 def confirm_research_draft(
     draft_id: uuid.UUID,
+    body: ConfirmResearchDraftRequest,
     idempotency_key: IdempotencyKey,
     identity: IdentityDependency,
     session: SessionDependency,
@@ -1000,7 +1059,10 @@ def confirm_research_draft(
     )
     request_hash = _request_hash(
         "confirm_research_draft",
-        {"draft_id": str(draft.id)},
+        {
+            "draft_id": str(draft.id),
+            "revision": body.revision,
+        },
     )
     cached = _cached_idempotency(
         session,
@@ -1018,11 +1080,15 @@ def confirm_research_draft(
             detail="Research draft is already confirmed",
         )
 
+    if body.revision != draft.revision:
+        _raise_draft_revision_conflict(draft)
+
     run, _, result = _create_run_records(
         session,
         identity=identity,
         question=draft.question,
     )
+    result["draft_revision"] = draft.revision
     draft.status = ResearchDraftStatus.CONFIRMED
     draft.run_id = run.id
     draft.updated_at = datetime.now(timezone.utc)
