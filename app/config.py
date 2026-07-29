@@ -31,6 +31,21 @@ class Settings(BaseSettings):
     max_claims: int = 100
     max_tokens: int = 200_000
     max_run_seconds: int = 3_600
+    max_input_file_bytes: int = Field(
+        default=5 * 1024 * 1024,
+        ge=1_024,
+        le=25 * 1024 * 1024,
+    )
+    max_input_text_bytes: int = Field(
+        default=100_000,
+        ge=1_000,
+        le=1_000_000,
+    )
+    max_input_materials: int = Field(
+        default=20,
+        ge=1,
+        le=100,
+    )
     estimated_input_cost_per_1m_tokens_usd: float = 0.0
     slo_min_run_success_rate: float = 0.95
     slo_max_external_p95_ms: float = 30_000

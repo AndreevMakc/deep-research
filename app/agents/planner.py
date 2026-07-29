@@ -1,17 +1,19 @@
 import uuid
+import logging
 
 from langchain_core.messages import (
     HumanMessage,
     SystemMessage,
 )
 
-from app.models import create_planner_model
 from app.budget import consume_run_budget, estimate_tokens
+from app.models import create_planner_model
 from app.prompts import load_prompt
 from app.resilience import retry_external_call
+from app.research_inputs import (
+    render_research_input_context,
+)
 from app.schemas.research_plan import ResearchPlan
-
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +22,7 @@ def generate_research_plan(
     question: str,
     *,
     run_id: uuid.UUID | None = None,
+    research_input: dict | None = None,
 ) -> ResearchPlan:
     if not question.strip():
         raise ValueError(
@@ -40,15 +43,28 @@ def generate_research_plan(
     )
 
     system_prompt = load_prompt("planner-v1.md")
+    input_context = render_research_input_context(
+        research_input or {}
+    )
+    user_content = (
+        "Создай план исследования для следующего "
+        f"вопроса:\n\n{question.strip()}"
+    )
+
+    if input_context:
+        user_content += (
+            "\n\nПодтверждённые пользовательские материалы "
+            "и настройки. Соблюдай роли материалов: "
+            "`verify` требует независимой проверки, "
+            "`primary_source` является первичным источником, "
+            "`context_only` задаёт контекст, "
+            "`do_not_cite` нельзя цитировать.\n\n"
+            f"{input_context}"
+        )
 
     messages = [
         SystemMessage(content=system_prompt),
-        HumanMessage(
-            content=(
-                "Создай план исследования для следующего "
-                f"вопроса:\n\n{question.strip()}"
-            )
-        ),
+        HumanMessage(content=user_content),
     ]
 
     if run_id is not None:
@@ -57,6 +73,7 @@ def generate_research_plan(
             external_requests=1,
             tokens=estimate_tokens(
                 system_prompt + question
+                + input_context
             ),
         )
 

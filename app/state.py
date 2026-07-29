@@ -43,6 +43,7 @@ class ResearchState(TypedDict):
 
     run_id: str
     question: str
+    research_input: dict
     plan: dict
     task_ids: list[str]
     findings: Annotated[list[dict], merge_findings]

@@ -16,6 +16,59 @@ from app.state import (
 
 
 class GraphRecoveryTests(unittest.TestCase):
+    def test_new_plan_receives_confirmed_research_input(
+        self,
+    ) -> None:
+        run_id = uuid.uuid4()
+        research_input = {
+            "materials": [
+                {
+                    "role": "verify",
+                    "url": "https://example.com/source",
+                }
+            ],
+            "settings": {
+                "effective": {"geography": "Россия"}
+            },
+        }
+        plan = MagicMock()
+        plan.model_dump.return_value = {
+            "subquestions": []
+        }
+        plan.subquestions = []
+
+        with (
+            patch(
+                "app.graph.SessionFactory",
+                MagicMock(),
+            ),
+            patch(
+                "app.graph.get_tasks_for_run",
+                return_value=[],
+            ),
+            patch(
+                "app.graph.generate_research_plan",
+                return_value=plan,
+            ) as generate_plan,
+            patch(
+                "app.graph.create_research_tasks",
+                return_value=[],
+            ),
+        ):
+            create_plan(
+                {
+                    "run_id": str(run_id),
+                    "question": "Исследовать рынок",
+                    "research_input": research_input,
+                }
+            )
+
+        generate_plan.assert_called_once_with(
+            question="Исследовать рынок",
+            run_id=run_id,
+            research_input=research_input,
+        )
+
     def test_resume_selects_only_unfinished_tasks(
         self,
     ) -> None:

@@ -56,6 +56,10 @@ def create_plan(state: ResearchState) -> dict:
             plan = generate_research_plan(
                 question=state["question"],
                 run_id=run_id,
+                research_input=state.get(
+                    "research_input",
+                    {},
+                ),
             )
             plan_data = plan.model_dump(mode="json")
             tasks = create_research_tasks(

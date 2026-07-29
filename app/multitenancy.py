@@ -52,6 +52,7 @@ API_PERMISSIONS: dict[ApiRole, set[str]] = {
         "review_report",
         "publish",
         "manage_identities",
+        "manage_research_settings",
     },
 }
 

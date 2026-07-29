@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import unittest
 import uuid
 import warnings
@@ -13,6 +14,7 @@ from app.config import get_settings
 from app.db.models import (
     ApiRole,
     ResearchDraft,
+    ResearchDraftMaterial,
     ResearchDraftStatus,
     ResearchRun,
     ReviewerIdentity,
@@ -29,6 +31,7 @@ from app.research_drafts import (
     interpret_research_question,
     refine_interpretation_with_answers,
 )
+from app.research_inputs import remove_material_file
 
 
 class ResearchDraftInterpretationTests(unittest.TestCase):
@@ -130,6 +133,7 @@ class ResearchDraftApiTests(unittest.TestCase):
         self.slug = f"draft-{suffix}"
         self.other_slug = f"draft-other-{suffix}"
         self.password = "Researcher password 123!"
+        self.admin_password = "Admin password 123!"
 
         with SessionFactory() as session:
             tenant = create_tenant(
@@ -142,7 +146,7 @@ class ResearchDraftApiTests(unittest.TestCase):
                 tenant=tenant,
                 subject="admin",
                 role=ApiRole.ADMIN,
-                password="Admin password 123!",
+                password=self.admin_password,
             )
             researcher = create_password_identity(
                 session,
@@ -190,6 +194,19 @@ class ResearchDraftApiTests(unittest.TestCase):
             app,
             base_url="https://testserver",
         )
+        self.admin_client = TestClient(
+            app,
+            base_url="https://testserver",
+        )
+        self.assertEqual(
+            self._login(
+                self.admin_client,
+                tenant=self.slug,
+                login="admin",
+                password=self.admin_password,
+            ),
+            200,
+        )
         self.assertEqual(
             self._login(
                 self.client,
@@ -222,8 +239,23 @@ class ResearchDraftApiTests(unittest.TestCase):
         self.client.close()
         self.other_client.close()
         self.cross_tenant_client.close()
+        self.admin_client.close()
 
         with SessionFactory() as session:
+            storage_paths = list(
+                session.scalars(
+                    select(
+                        ResearchDraftMaterial.storage_path
+                    ).where(
+                        ResearchDraftMaterial.tenant_id
+                        == self.tenant_id
+                    )
+                ).all()
+            )
+
+            for storage_path in storage_paths:
+                remove_material_file(storage_path)
+
             for tenant_id in (
                 self.tenant_id,
                 self.other_tenant_id,
@@ -784,6 +816,238 @@ class ResearchDraftApiTests(unittest.TestCase):
         )
         self.assertEqual(denied_answer.status_code, 404)
 
+    def test_materials_settings_and_provenance(
+        self,
+    ) -> None:
+        created = self._create_draft()
+        draft_id = created["id"]
+        material_path = (
+            f"/api/v1/research-drafts/{draft_id}/materials"
+        )
+
+        added_url = self.client.post(
+            material_path,
+            headers=self._headers(
+                self.client,
+                idempotency_key="add-material-url-0001",
+            ),
+            json={
+                "revision": created["revision"],
+                "kind": "url",
+                "url": "https://example.com/source#fragment",
+            },
+        )
+        self.assertEqual(added_url.status_code, 201)
+        current = added_url.json()
+        self.assertEqual(
+            current["materials"][0]["role"],
+            "verify",
+        )
+        self.assertEqual(
+            current["materials"][0]["url"],
+            "https://example.com/source",
+        )
+
+        added_text = self.client.post(
+            material_path,
+            headers=self._headers(
+                self.client,
+                idempotency_key="add-material-text-0001",
+            ),
+            json={
+                "revision": current["revision"],
+                "kind": "note",
+                "role": "context_only",
+                "text": "Контекст, который нельзя считать доказательством.",
+            },
+        )
+        self.assertEqual(added_text.status_code, 201)
+        current = added_text.json()
+        note_id = current["materials"][1]["id"]
+
+        added_file = self.client.post(
+            material_path,
+            headers=self._headers(
+                self.client,
+                idempotency_key="add-material-file-0001",
+            ),
+            json={
+                "revision": current["revision"],
+                "kind": "file",
+                "role": "primary_source",
+                "filename": "brief.md",
+                "mime_type": "text/markdown",
+                "content_base64": base64.b64encode(
+                    b"# Primary brief\nVerified facts."
+                ).decode("ascii"),
+            },
+        )
+        self.assertEqual(added_file.status_code, 201)
+        current = added_file.json()
+        self.assertEqual(
+            current["materials"][2]["kind"],
+            "markdown",
+        )
+
+        duplicate = self.client.post(
+            material_path,
+            headers=self._headers(
+                self.client,
+                idempotency_key="add-material-duplicate-0001",
+            ),
+            json={
+                "revision": current["revision"],
+                "kind": "url",
+                "url": "https://example.com/source",
+            },
+        )
+        self.assertEqual(duplicate.status_code, 409)
+
+        invalid = self.client.post(
+            material_path,
+            headers=self._headers(
+                self.client,
+                idempotency_key="add-material-invalid-0001",
+            ),
+            json={
+                "revision": current["revision"],
+                "kind": "file",
+                "filename": "malware.exe",
+                "content_base64": base64.b64encode(
+                    b"not allowed"
+                ).decode("ascii"),
+            },
+        )
+        self.assertEqual(invalid.status_code, 422)
+
+        hidden = self.cross_tenant_client.post(
+            material_path,
+            headers=self._headers(
+                self.cross_tenant_client,
+                idempotency_key="add-material-hidden-0001",
+            ),
+            json={
+                "revision": current["revision"],
+                "kind": "note",
+                "text": "Недоступный материал",
+            },
+        )
+        self.assertEqual(hidden.status_code, 404)
+
+        deleted = self.client.request(
+            "DELETE",
+            f"{material_path}/{note_id}",
+            headers=self._headers(self.client),
+            json={"revision": current["revision"]},
+        )
+        self.assertEqual(deleted.status_code, 200)
+        current = deleted.json()
+        self.assertEqual(len(current["materials"]), 2)
+
+        denied_settings = self.client.patch(
+            (
+                f"/api/v1/research-drafts/{draft_id}"
+                "/settings"
+            ),
+            headers=self._headers(self.client),
+            json={
+                "revision": current["revision"],
+                "geography": "Россия",
+            },
+        )
+        self.assertEqual(denied_settings.status_code, 403)
+
+        identity = self.client.get(
+            "/api/v1/auth/session"
+        ).json()
+        self.assertFalse(
+            identity["capabilities"][
+                "manage_research_settings"
+            ]
+        )
+
+        settings = self.admin_client.patch(
+            (
+                f"/api/v1/research-drafts/{draft_id}"
+                "/settings"
+            ),
+            headers=self._headers(self.admin_client),
+            json={
+                "revision": current["revision"],
+                "geography": "Россия",
+                "languages": ["Русский"],
+                "report_format": "Краткая записка",
+            },
+        )
+        self.assertEqual(settings.status_code, 200)
+        current = settings.json()
+        self.assertEqual(
+            current["settings"]["effective"]["geography"],
+            "Россия",
+        )
+        self.assertEqual(
+            set(current["settings"]["overrides"]),
+            {"geography", "languages", "report_format"},
+        )
+
+        confirmed = self.client.post(
+            (
+                f"/api/v1/research-drafts/{draft_id}"
+                "/confirm"
+            ),
+            headers=self._headers(
+                self.client,
+                idempotency_key="confirm-inputs-0001",
+            ),
+            json={"revision": current["revision"]},
+        )
+        self.assertEqual(confirmed.status_code, 202)
+        run_id = confirmed.json()["run_id"]
+
+        with SessionFactory() as session:
+            work_item = session.scalar(
+                select(WorkItem).where(
+                    WorkItem.run_id == uuid.UUID(run_id)
+                )
+            )
+            research_input = work_item.payload[
+                "research_input"
+            ]
+            self.assertEqual(
+                research_input["draft_revision"],
+                current["revision"],
+            )
+            self.assertEqual(
+                len(research_input["materials"]),
+                2,
+            )
+            self.assertEqual(
+                research_input["settings"]["effective"][
+                    "report_format"
+                ],
+                "Краткая записка",
+            )
+
+        provenance = self.admin_client.get(
+            f"/api/v1/runs/{run_id}/provenance"
+        )
+        self.assertEqual(provenance.status_code, 200)
+        self.assertEqual(
+            provenance.json()["research_input"],
+            research_input,
+        )
+
+        blocked_delete = self.client.request(
+            "DELETE",
+            (
+                f"{material_path}/"
+                f"{current['materials'][0]['id']}"
+            ),
+            headers=self._headers(self.client),
+            json={"revision": current["revision"]},
+        )
+        self.assertEqual(blocked_delete.status_code, 409)
+
 
 class ResearchDraftDashboardTests(unittest.TestCase):
     def test_dashboard_uses_confirmation_flow(self) -> None:
@@ -805,6 +1069,12 @@ class ResearchDraftDashboardTests(unittest.TestCase):
         )
         self.assertIn(
             "/api/v1/research-drafts/${activeDraft.id}/confirm",
+            dashboard,
+        )
+        self.assertIn('id="material-file-form"', dashboard)
+        self.assertIn('id="advanced-settings"', dashboard)
+        self.assertIn(
+            "manage_research_settings",
             dashboard,
         )
 

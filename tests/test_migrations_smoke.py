@@ -94,6 +94,7 @@ def main() -> None:
         assert "browser_sessions" in tables
         assert "research_run_views" in tables
         assert "research_drafts" in tables
+        assert "research_draft_materials" in tables
         assert "work_items" in tables
         assert "idempotency_records" in tables
         assert "webhook_subscriptions" in tables
@@ -163,7 +164,29 @@ def main() -> None:
             "status",
             "created_at",
             "updated_at",
+            "auto_settings",
+            "settings_overrides",
         } <= draft_columns
+        material_columns = {
+            column["name"]
+            for column in inspector.get_columns(
+                "research_draft_materials"
+            )
+        }
+        assert {
+            "tenant_id",
+            "draft_id",
+            "kind",
+            "role",
+            "name",
+            "url",
+            "text_content",
+            "mime_type",
+            "content_hash",
+            "byte_size",
+            "storage_path",
+            "created_at",
+        } <= material_columns
         draft_checks = {
             constraint["name"]
             for constraint in inspector.get_check_constraints(
