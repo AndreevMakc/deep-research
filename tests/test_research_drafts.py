@@ -238,6 +238,7 @@ class ResearchDraftApiTests(unittest.TestCase):
     ) -> None:
         created = self._create_draft()
         self.assertEqual(created["status"], "draft")
+        self.assertEqual(created["revision"], 1)
         self.assertIsNone(created["run_id"])
         self.assertTrue(created["scope"])
         self.assertTrue(created["period"])
@@ -273,15 +274,69 @@ class ResearchDraftApiTests(unittest.TestCase):
             f"/api/v1/research-drafts/{created['id']}",
             headers=self._headers(self.client),
             json={
-                "question": (
-                    "Какие альтернативы доступны сейчас?"
-                )
+                "revision": created["revision"],
+                "scope": "Сравнить доступные альтернативы",
+                "period": "Данные за последние 12 месяцев",
+                "assumptions": [
+                    "Рассматриваются зрелые решения",
+                    "Цены сравниваются без скидок",
+                ],
             },
         )
         self.assertEqual(updated.status_code, 200)
+        updated_payload = updated.json()
         self.assertEqual(
-            updated.json()["question"],
-            "Какие альтернативы доступны сейчас?",
+            updated_payload["scope"],
+            "Сравнить доступные альтернативы",
+        )
+        self.assertEqual(updated_payload["revision"], 2)
+
+        edited_again = self.client.patch(
+            f"/api/v1/research-drafts/{created['id']}",
+            headers=self._headers(self.client),
+            json={
+                "revision": updated_payload["revision"],
+                "scope": "Сравнить три доступные альтернативы",
+                "period": updated_payload["period"],
+                "assumptions": updated_payload["assumptions"],
+            },
+        )
+        self.assertEqual(edited_again.status_code, 200)
+        latest = edited_again.json()
+        self.assertEqual(latest["revision"], 3)
+
+        stale_update = self.client.patch(
+            f"/api/v1/research-drafts/{created['id']}",
+            headers=self._headers(self.client),
+            json={
+                "revision": created["revision"],
+                "scope": "Устаревшее изменение охвата",
+                "period": "Другой период",
+                "assumptions": ["Не должно сохраниться"],
+            },
+        )
+        self.assertEqual(stale_update.status_code, 409)
+        conflict = stale_update.json()["detail"]
+        self.assertEqual(
+            conflict["code"],
+            "draft_revision_conflict",
+        )
+        self.assertEqual(
+            conflict["current_draft"]["revision"],
+            latest["revision"],
+        )
+
+        current_after_edits = self.client.get(
+            "/api/v1/research-drafts/current"
+        )
+        self.assertEqual(current_after_edits.status_code, 200)
+        self.assertEqual(
+            current_after_edits.json()["scope"],
+            latest["scope"],
+        )
+        self.assertEqual(
+            current_after_edits.json()["revision"],
+            latest["revision"],
         )
 
         with SessionFactory() as session:
@@ -304,6 +359,19 @@ class ResearchDraftApiTests(unittest.TestCase):
                 0,
             )
 
+        stale_confirmation = self.client.post(
+            (
+                f"/api/v1/research-drafts/"
+                f"{created['id']}/confirm"
+            ),
+            headers=self._headers(
+                self.client,
+                idempotency_key="confirm-stale-draft-0001",
+            ),
+            json={"revision": updated_payload["revision"]},
+        )
+        self.assertEqual(stale_confirmation.status_code, 409)
+
         confirmed = self.client.post(
             (
                 f"/api/v1/research-drafts/"
@@ -313,8 +381,13 @@ class ResearchDraftApiTests(unittest.TestCase):
                 self.client,
                 idempotency_key="confirm-draft-0001",
             ),
+            json={"revision": latest["revision"]},
         )
         self.assertEqual(confirmed.status_code, 202)
+        self.assertEqual(
+            confirmed.json()["draft_revision"],
+            latest["revision"],
+        )
         run_id = confirmed.json()["run_id"]
 
         confirmed_replay = self.client.post(
@@ -326,6 +399,7 @@ class ResearchDraftApiTests(unittest.TestCase):
                 self.client,
                 idempotency_key="confirm-draft-0001",
             ),
+            json={"revision": latest["revision"]},
         )
         self.assertEqual(confirmed_replay.status_code, 202)
         self.assertEqual(
@@ -348,6 +422,7 @@ class ResearchDraftApiTests(unittest.TestCase):
                 self.client,
                 idempotency_key="confirm-draft-0002",
             ),
+            json={"revision": latest["revision"]},
         )
         self.assertEqual(duplicate.status_code, 409)
         self.assertIsNone(
@@ -365,6 +440,14 @@ class ResearchDraftApiTests(unittest.TestCase):
             self.assertEqual(
                 draft.status,
                 ResearchDraftStatus.CONFIRMED,
+            )
+            self.assertEqual(
+                draft.revision,
+                latest["revision"],
+            )
+            self.assertEqual(
+                draft.scope,
+                latest["scope"],
             )
             self.assertEqual(str(draft.run_id), run_id)
             self.assertEqual(
@@ -405,8 +488,22 @@ class ResearchDraftApiTests(unittest.TestCase):
                 self.other_client,
                 idempotency_key="confirm-hidden-draft-0001",
             ),
+            json={"revision": created["revision"]},
         )
         self.assertEqual(denied.status_code, 404)
+        denied_update = self.cross_tenant_client.patch(
+            path,
+            headers=self._headers(
+                self.cross_tenant_client,
+            ),
+            json={
+                "revision": created["revision"],
+                "scope": "Недоступное изменение",
+                "period": "Любой период",
+                "assumptions": ["Не должно сохраниться"],
+            },
+        )
+        self.assertEqual(denied_update.status_code, 404)
 
 
 class ResearchDraftDashboardTests(unittest.TestCase):
@@ -420,6 +517,8 @@ class ResearchDraftDashboardTests(unittest.TestCase):
 
         self.assertIn('id="draft-card"', dashboard)
         self.assertIn("Изменить детали", dashboard)
+        self.assertIn('id="draft-edit-form"', dashboard)
+        self.assertIn("draft_revision_conflict", dashboard)
         self.assertIn(
             '"/api/v1/research-drafts"',
             dashboard,

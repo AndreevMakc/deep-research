@@ -155,10 +155,21 @@ def main() -> None:
             "period",
             "assumptions",
             "estimated_duration_minutes",
+            "revision",
             "status",
             "created_at",
             "updated_at",
         } <= draft_columns
+        draft_checks = {
+            constraint["name"]
+            for constraint in inspector.get_check_constraints(
+                "research_drafts"
+            )
+        }
+        assert (
+            "ck_research_drafts_revision_positive"
+            in draft_checks
+        )
         assert "review_status" in claim_columns
         review_columns = {
             column["name"]
