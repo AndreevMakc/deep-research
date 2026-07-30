@@ -8,7 +8,9 @@ from sqlalchemy.orm import Session
 
 from app.db.models import (
     ResearchRun,
+    ResearchTask,
     RunStatus,
+    TaskStatus,
     WorkItem,
     WorkStatus,
 )
@@ -39,6 +41,8 @@ def enqueue_run(
         attempts=0,
         max_attempts=3,
         cancel_requested=False,
+        pause_requested=False,
+        finish_requested=False,
     )
     session.add(item)
     session.commit()
@@ -97,6 +101,7 @@ def heartbeat_work(
     item_id: uuid.UUID,
     worker_id: str,
     lease_seconds: int = 60,
+    allow_finish_requested: bool = False,
 ) -> bool:
     item = session.get(WorkItem, item_id)
 
@@ -107,7 +112,14 @@ def heartbeat_work(
     ):
         return False
 
-    if item.cancel_requested:
+    if (
+        item.cancel_requested
+        or item.pause_requested
+        or (
+            item.finish_requested
+            and not allow_finish_requested
+        )
+    ):
         return False
 
     now = datetime.now(timezone.utc)
@@ -117,6 +129,167 @@ def heartbeat_work(
     )
     session.commit()
     return True
+
+
+def request_run_pause(
+    session: Session,
+    *,
+    tenant_id: uuid.UUID,
+    run_id: uuid.UUID,
+) -> WorkItem:
+    run, item = _control_target(
+        session,
+        tenant_id=tenant_id,
+        run_id=run_id,
+    )
+
+    if item.status == WorkStatus.PAUSED:
+        return item
+
+    if item.status not in {
+        WorkStatus.QUEUED,
+        WorkStatus.LEASED,
+    }:
+        raise RuntimeError(
+            f"Cannot pause work item: {item.status.value}"
+        )
+
+    item.pause_requested = True
+    run.status = RunStatus.PAUSE_REQUESTED
+
+    if item.status == WorkStatus.QUEUED:
+        item.status = WorkStatus.PAUSED
+        run.status = RunStatus.PAUSED
+
+    session.flush()
+    session.refresh(item)
+    return item
+
+
+def request_run_resume(
+    session: Session,
+    *,
+    tenant_id: uuid.UUID,
+    run_id: uuid.UUID,
+) -> WorkItem:
+    run, item = _control_target(
+        session,
+        tenant_id=tenant_id,
+        run_id=run_id,
+    )
+
+    if (
+        item.status == WorkStatus.QUEUED
+        and not item.pause_requested
+    ):
+        return item
+
+    if item.status != WorkStatus.PAUSED:
+        raise RuntimeError(
+            f"Cannot resume work item: {item.status.value}"
+        )
+
+    item.pause_requested = False
+    item.status = WorkStatus.QUEUED
+    item.available_at = datetime.now(timezone.utc)
+    run.status = RunStatus.CREATED
+    session.flush()
+    session.refresh(item)
+    return item
+
+
+def request_run_early_completion(
+    session: Session,
+    *,
+    tenant_id: uuid.UUID,
+    run_id: uuid.UUID,
+) -> WorkItem:
+    run, item = _control_target(
+        session,
+        tenant_id=tenant_id,
+        run_id=run_id,
+    )
+    completed_tasks = session.scalar(
+        select(func.count(ResearchTask.id)).where(
+            ResearchTask.run_id == run_id,
+            ResearchTask.status == TaskStatus.COMPLETED,
+        )
+    )
+
+    if not completed_tasks:
+        raise RuntimeError(
+            "Cannot finish before any research direction completes"
+        )
+
+    if item.status not in {
+        WorkStatus.QUEUED,
+        WorkStatus.LEASED,
+        WorkStatus.PAUSED,
+    }:
+        raise RuntimeError(
+            f"Cannot finish work item: {item.status.value}"
+        )
+
+    item.pause_requested = False
+    item.finish_requested = True
+
+    if item.status in {
+        WorkStatus.QUEUED,
+        WorkStatus.PAUSED,
+    }:
+        item.status = WorkStatus.QUEUED
+        item.available_at = datetime.now(timezone.utc)
+        item.payload = {
+            **item.payload,
+            "finish_early": True,
+        }
+        run.status = RunStatus.CREATED
+
+    session.flush()
+    session.refresh(item)
+    return item
+
+
+def _control_target(
+    session: Session,
+    *,
+    tenant_id: uuid.UUID,
+    run_id: uuid.UUID,
+) -> tuple[ResearchRun, WorkItem]:
+    run = session.scalar(
+        select(ResearchRun).where(
+            ResearchRun.id == run_id,
+            ResearchRun.tenant_id == tenant_id,
+        ).with_for_update()
+    )
+
+    if run is None:
+        raise RuntimeError(f"Research run not found: {run_id}")
+
+    item = session.scalar(
+        select(WorkItem).where(
+            WorkItem.run_id == run_id,
+            WorkItem.tenant_id == tenant_id,
+            WorkItem.kind == "execute_research_run",
+        ).with_for_update()
+    )
+
+    if item is None:
+        raise RuntimeError(
+            f"Work item not found for run: {run_id}"
+        )
+
+    if item.status in {
+        WorkStatus.SUCCEEDED,
+        WorkStatus.FAILED,
+        WorkStatus.CANCELLED,
+    }:
+        raise RuntimeError(
+            f"Cannot control terminal work item: "
+            f"{item.status.value}"
+        )
+
+    return run, item
 
 
 def request_run_cancellation(
@@ -159,7 +332,10 @@ def request_run_cancellation(
     item.cancel_requested = True
     run.status = RunStatus.CANCEL_REQUESTED
 
-    if item.status == WorkStatus.QUEUED:
+    if item.status in {
+        WorkStatus.QUEUED,
+        WorkStatus.PAUSED,
+    }:
         item.status = WorkStatus.CANCELLED
         run.status = RunStatus.CANCELLED
 
@@ -187,6 +363,10 @@ def finish_work(
 
     run = session.get(ResearchRun, item.run_id)
 
+    finalizing_early = bool(
+        item.payload.get("finish_early")
+    )
+
     if item.cancel_requested:
         item.status = WorkStatus.CANCELLED
 
@@ -194,6 +374,26 @@ def finish_work(
             run.status = RunStatus.CANCELLED
     elif succeeded:
         item.status = WorkStatus.SUCCEEDED
+        item.pause_requested = False
+        item.finish_requested = False
+    elif item.pause_requested:
+        item.status = WorkStatus.PAUSED
+        item.pause_requested = False
+        item.attempts = max(0, item.attempts - 1)
+
+        if run is not None:
+            run.status = RunStatus.PAUSED
+    elif item.finish_requested and not finalizing_early:
+        item.status = WorkStatus.QUEUED
+        item.available_at = datetime.now(timezone.utc)
+        item.payload = {
+            **item.payload,
+            "finish_early": True,
+        }
+        item.attempts = max(0, item.attempts - 1)
+
+        if run is not None:
+            run.status = RunStatus.CREATED
     elif item.attempts < item.max_attempts:
         item.status = WorkStatus.QUEUED
         item.available_at = datetime.now(

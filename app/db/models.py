@@ -26,6 +26,8 @@ from app.db.base import Base
 class RunStatus(str, enum.Enum):
     CREATED = "created"
     RUNNING = "running"
+    PAUSE_REQUESTED = "pause_requested"
+    PAUSED = "paused"
     COMPLETED = "completed"
     COMPLETED_WITH_ERRORS = "completed_with_errors"
     FAILED = "failed"
@@ -118,6 +120,7 @@ class ApiRole(str, enum.Enum):
 class WorkStatus(str, enum.Enum):
     QUEUED = "queued"
     LEASED = "leased"
+    PAUSED = "paused"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -1609,6 +1612,16 @@ class WorkItem(Base):
     )
 
     cancel_requested: Mapped[bool] = mapped_column(
+        nullable=False,
+        default=False,
+    )
+
+    pause_requested: Mapped[bool] = mapped_column(
+        nullable=False,
+        default=False,
+    )
+
+    finish_requested: Mapped[bool] = mapped_column(
         nullable=False,
         default=False,
     )

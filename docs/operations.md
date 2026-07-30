@@ -32,6 +32,31 @@ attempt number, error code, token estimate and estimated cost. Prompts,
 page bodies, API keys and authorization values are not written to
 telemetry.
 
+## Run progress and safe control
+
+`GET /api/v1/runs/{run_id}/progress` returns stable workflow stages
+(`directions`, `sources`, `verification`, `report`), persisted counters,
+elapsed wall time and the remaining configured time upper bound. It does
+not expose a synthetic completion percentage. Users with provenance access
+also receive a collapsible summary of task errors and retry events.
+
+Authors and tenant administrators can control non-terminal work through
+idempotent endpoints:
+
+- `POST /api/v1/runs/{run_id}/pause` requests a cooperative stop. A leased
+  worker releases the subprocess after the current heartbeat and the same
+  work item becomes `paused`; the pause does not consume a retry attempt.
+- `POST /api/v1/runs/{run_id}/resume` returns the paused item to the durable
+  queue. LangGraph checkpoints and persisted task/verification states ensure
+  completed work is not repeated.
+- `POST /api/v1/runs/{run_id}/finish` stops unfinished research and starts a
+  report pass from completed directions and their saved claims. The endpoint
+  rejects a run that has no completed direction.
+
+Closing the dashboard does not affect execution. Workers continue leasing
+and heartbeating work from PostgreSQL, and the dashboard reconstructs the
+current state from the progress endpoint after reload.
+
 ## Reviewer identities
 
 Bootstrap the first administrator:

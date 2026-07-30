@@ -142,6 +142,56 @@ class GraphRecoveryTests(unittest.TestCase):
             ["claim-completed"],
         )
 
+    def test_early_finish_uses_only_completed_tasks(
+        self,
+    ) -> None:
+        completed = SimpleNamespace(
+            id=uuid.uuid4(),
+            status=TaskStatus.COMPLETED,
+            output_data={
+                "task_question": "Completed question",
+                "summary": "Saved result",
+                "claim_ids": ["saved-claim"],
+            },
+            input_data={"title": "Completed"},
+            question="Completed question",
+            priority=1,
+        )
+        unfinished = SimpleNamespace(
+            id=uuid.uuid4(),
+            status=TaskStatus.RUNNING,
+            output_data={},
+            input_data={"title": "Unfinished"},
+            question="Unfinished question",
+            priority=2,
+        )
+
+        with (
+            patch(
+                "app.graph.SessionFactory",
+                MagicMock(),
+            ),
+            patch(
+                "app.graph.get_tasks_for_run",
+                return_value=[completed, unfinished],
+            ),
+        ):
+            result = create_plan(
+                {
+                    "run_id": str(uuid.uuid4()),
+                    "question": "Finish with saved data",
+                    "finish_early": True,
+                    "plan": {"persisted": True},
+                }
+            )
+
+        self.assertEqual(result["task_ids"], [])
+        self.assertEqual(
+            result["claim_ids"],
+            ["saved-claim"],
+        )
+        self.assertEqual(len(result["findings"]), 1)
+
     def test_reducers_replace_replayed_worker_results(
         self,
     ) -> None:

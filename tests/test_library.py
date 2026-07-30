@@ -38,6 +38,9 @@ class ResearchLibraryTests(unittest.TestCase):
         run.status = RunStatus.COMPLETED
         self.assertEqual(library_group(run), "ready")
 
+        run.status = RunStatus.PAUSED
+        self.assertEqual(library_group(run), "active")
+
         run.archived_at = datetime.now(timezone.utc)
         self.assertEqual(library_group(run), "archived")
 

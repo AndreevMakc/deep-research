@@ -42,6 +42,14 @@ def update_run_status(
                 f"Research run not found: {run_id}"
             )
 
+        if run.status in {
+            RunStatus.PAUSE_REQUESTED,
+            RunStatus.PAUSED,
+            RunStatus.CANCEL_REQUESTED,
+            RunStatus.CANCELLED,
+        }:
+            return
+
         run.status = status
 
         if (
@@ -97,11 +105,19 @@ def main() -> int:
     )
     arguments = sys.argv[1:]
     resume_run_id: uuid.UUID | None = None
+    finish_early = False
 
     if arguments[:1] == ["--resume"]:
-        if len(arguments) != 2:
+        if (
+            len(arguments) not in {2, 3}
+            or (
+                len(arguments) == 3
+                and arguments[2] != "--finish-early"
+            )
+        ):
             print(
-                "Usage: python -m app.main --resume <run-id>",
+                "Usage: python -m app.main --resume <run-id> "
+                "[--finish-early]",
                 file=sys.stderr,
             )
             return 2
@@ -115,6 +131,7 @@ def main() -> int:
             )
             return 2
 
+        finish_early = len(arguments) == 3
         question = ""
     else:
         question = " ".join(arguments).strip()
@@ -195,6 +212,7 @@ def main() -> int:
             "run_id": str(run_id),
             "question": question,
             "research_input": research_input,
+            "finish_early": finish_early,
             "plan": {},
             "task_ids": [],
             "findings": [],
@@ -207,7 +225,11 @@ def main() -> int:
 
         config = {
             "configurable": {
-                "thread_id": str(run_id),
+                "thread_id": (
+                    f"{run_id}:finish"
+                    if finish_early
+                    else str(run_id)
+                ),
             },
             "max_concurrency": (
                 max(

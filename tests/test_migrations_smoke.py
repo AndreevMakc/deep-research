@@ -187,6 +187,16 @@ def main() -> None:
             "storage_path",
             "created_at",
         } <= material_columns
+        work_columns = {
+            column["name"]
+            for column in inspector.get_columns(
+                "work_items"
+            )
+        }
+        assert {
+            "pause_requested",
+            "finish_requested",
+        } <= work_columns
         draft_checks = {
             constraint["name"]
             for constraint in inspector.get_check_constraints(
@@ -251,7 +261,28 @@ def main() -> None:
                 ).scalars()
             )
 
-        assert "COMPLETED_WITH_ERRORS" in run_statuses
+        assert {
+            "COMPLETED_WITH_ERRORS",
+            "PAUSE_REQUESTED",
+            "PAUSED",
+        } <= run_statuses
+        with engine.connect() as connection:
+            work_statuses = set(
+                connection.execute(
+                    text(
+                        """
+                        SELECT enumlabel
+                        FROM pg_enum
+                        JOIN pg_type
+                          ON pg_type.oid =
+                             pg_enum.enumtypid
+                        WHERE pg_type.typname =
+                              'work_status'
+                        """
+                    )
+                ).scalars()
+            )
+        assert "PAUSED" in work_statuses
         verification_constraints = {
             constraint["name"]
             for constraint in inspector.get_unique_constraints(
