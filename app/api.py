@@ -72,7 +72,12 @@ from app.operations import (
     review_claim,
     review_report,
 )
-from app.queue import request_run_cancellation
+from app.queue import (
+    request_run_cancellation,
+    request_run_early_completion,
+    request_run_pause,
+    request_run_resume,
+)
 from app.research_drafts import (
     build_clarification_questions,
     interpret_research_question,
@@ -92,6 +97,7 @@ from app.webhooks import (
     validate_webhook_url,
 )
 from app.source_store import PROJECT_ROOT
+from app.run_progress import build_run_progress
 
 
 app = FastAPI(
@@ -369,6 +375,7 @@ def _identity_payload(identity: ApiIdentity) -> dict:
             "manage_library": (
                 "manage_library" in permissions
             ),
+            "control_run": "control_run" in permissions,
             "view_provenance": (
                 "view_provenance" in permissions
             ),
@@ -820,6 +827,8 @@ def _create_run_records(
         attempts=0,
         max_attempts=3,
         cancel_requested=False,
+        pause_requested=False,
+        finish_requested=False,
     )
     session.add(item)
     session.flush()
@@ -1963,6 +1972,24 @@ def get_run(
     )
 
 
+@app.get("/api/v1/runs/{run_id}/progress")
+def get_run_progress(
+    run_id: uuid.UUID,
+    identity: IdentityDependency,
+    session: SessionDependency,
+) -> dict:
+    _require(identity, "view")
+    run = _tenant_run(session, identity, run_id)
+    return build_run_progress(
+        session,
+        run=run,
+        include_technical=(
+            "view_provenance"
+            in API_PERMISSIONS[identity.role]
+        ),
+    )
+
+
 @app.patch("/api/v1/runs/{run_id}")
 def update_run(
     run_id: uuid.UUID,
@@ -2189,6 +2216,135 @@ def cancel_run(
     )
     session.commit()
     return result
+
+
+def _control_run(
+    *,
+    operation: str,
+    run_id: uuid.UUID,
+    idempotency_key: str,
+    identity: ApiIdentity,
+    session: Session,
+) -> dict | JSONResponse:
+    run = _tenant_run(session, identity, run_id)
+    _require(identity, "control_run")
+    _require_library_owner(identity, run)
+    request_hash = _request_hash(
+        operation,
+        {"run_id": str(run_id)},
+    )
+    cached = _cached_idempotency(
+        session,
+        identity=identity,
+        key=idempotency_key,
+        request_hash=request_hash,
+    )
+
+    if cached is not None:
+        return cached
+
+    handlers = {
+        "pause_run": request_run_pause,
+        "resume_run": request_run_resume,
+        "finish_run": request_run_early_completion,
+    }
+
+    try:
+        item = handlers[operation](
+            session,
+            tenant_id=identity.tenant_id,
+            run_id=run_id,
+        )
+    except RuntimeError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(error),
+        ) from error
+
+    session.refresh(run)
+    result = {
+        "run_id": str(run_id),
+        "run_status": run.status.value,
+        "work_status": item.status.value,
+    }
+    _store_idempotency(
+        session,
+        identity=identity,
+        key=idempotency_key,
+        request_hash=request_hash,
+        response_json=result,
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    enqueue_webhook_event(
+        session,
+        tenant_id=identity.tenant_id,
+        run_id=run_id,
+        event_type={
+            "pause_run": "run.pause_requested",
+            "resume_run": "run.resumed",
+            "finish_run": "run.finish_requested",
+        }[operation],
+        payload=result,
+    )
+    session.commit()
+    return result
+
+
+@app.post(
+    "/api/v1/runs/{run_id}/pause",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def pause_run(
+    run_id: uuid.UUID,
+    idempotency_key: IdempotencyKey,
+    identity: IdentityDependency,
+    session: SessionDependency,
+):
+    return _control_run(
+        operation="pause_run",
+        run_id=run_id,
+        idempotency_key=idempotency_key,
+        identity=identity,
+        session=session,
+    )
+
+
+@app.post(
+    "/api/v1/runs/{run_id}/resume",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def resume_run(
+    run_id: uuid.UUID,
+    idempotency_key: IdempotencyKey,
+    identity: IdentityDependency,
+    session: SessionDependency,
+):
+    return _control_run(
+        operation="resume_run",
+        run_id=run_id,
+        idempotency_key=idempotency_key,
+        identity=identity,
+        session=session,
+    )
+
+
+@app.post(
+    "/api/v1/runs/{run_id}/finish",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def finish_run(
+    run_id: uuid.UUID,
+    idempotency_key: IdempotencyKey,
+    identity: IdentityDependency,
+    session: SessionDependency,
+):
+    return _control_run(
+        operation="finish_run",
+        run_id=run_id,
+        idempotency_key=idempotency_key,
+        identity=identity,
+        session=session,
+    )
 
 
 def _tenant_claim(

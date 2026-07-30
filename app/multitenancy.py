@@ -27,6 +27,7 @@ API_PERMISSIONS: dict[ApiRole, set[str]] = {
         "view",
         "create_run",
         "cancel_run",
+        "control_run",
         "manage_library",
     },
     ApiRole.REVIEWER: {
@@ -46,6 +47,7 @@ API_PERMISSIONS: dict[ApiRole, set[str]] = {
         "view",
         "create_run",
         "cancel_run",
+        "control_run",
         "manage_library",
         "view_provenance",
         "review_claim",

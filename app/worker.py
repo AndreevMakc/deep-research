@@ -35,18 +35,24 @@ def execute_work_item(
             f"Unsupported work kind: {item.kind}"
         )
 
-    process = subprocess.Popen(
-        [
-            sys.executable,
-            "-m",
-            "app.main",
-            "--resume",
-            str(item.run_id),
-        ]
+    command = [
+        sys.executable,
+        "-m",
+        "app.main",
+        "--resume",
+        str(item.run_id),
+    ]
+    finish_early = bool(
+        item.payload.get("finish_early")
     )
-    heartbeat_interval = max(
-        1.0,
-        lease_seconds / 3,
+
+    if finish_early:
+        command.append("--finish-early")
+
+    process = subprocess.Popen(command)
+    heartbeat_interval = min(
+        5.0,
+        max(1.0, lease_seconds / 3),
     )
 
     while process.poll() is None:
@@ -58,6 +64,7 @@ def execute_work_item(
                 item_id=item.id,
                 worker_id=worker_id,
                 lease_seconds=lease_seconds,
+                allow_finish_requested=finish_early,
             )
 
         if owned:

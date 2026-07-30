@@ -8,6 +8,8 @@ from app.db.models import ResearchRun, RunStatus
 ACTIVE_RUN_STATUSES = {
     RunStatus.CREATED,
     RunStatus.RUNNING,
+    RunStatus.PAUSE_REQUESTED,
+    RunStatus.PAUSED,
     RunStatus.CANCEL_REQUESTED,
 }
 

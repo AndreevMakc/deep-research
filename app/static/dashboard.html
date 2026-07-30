@@ -358,6 +358,39 @@
       line-height: 1.65;
     }
     .detail-actions { display: flex; gap: 9px; flex-wrap: wrap; margin-top: 22px; }
+    .progress-card {
+      display: grid;
+      gap: 14px;
+      margin: 22px 0;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: #f8faf6;
+    }
+    .progress-card h3 { margin: 0; font-size: 1rem; }
+    .progress-counters {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .progress-counter {
+      display: grid;
+      gap: 3px;
+      padding: 10px;
+      border-radius: 10px;
+      background: var(--surface);
+      font-size: .78rem;
+      color: var(--muted);
+    }
+    .progress-counter strong { color: var(--ink); font-size: 1rem; }
+    .technical-details {
+      border-top: 1px solid var(--line);
+      padding-top: 12px;
+      color: var(--muted);
+      font-size: .82rem;
+    }
+    .technical-details summary { cursor: pointer; color: var(--ink); }
+    .technical-event { margin: 7px 0; }
     .title-form { display: flex; align-items: end; gap: 8px; }
     .title-form label { flex: 1; margin: 0; }
     .provenance { margin-top: 26px; border-top: 1px solid var(--line); padding-top: 20px; }
@@ -375,6 +408,7 @@
       .workspace-grid { grid-template-columns: 1fr; }
       .draft-grid { grid-template-columns: 1fr; }
       .draft-field.wide { grid-column: auto; }
+      .progress-counters { grid-template-columns: 1fr; }
       .details { min-height: 0; }
     }
     @media (prefers-reduced-motion: reduce) {
@@ -672,6 +706,8 @@
     const statuses = {
       created: "В очереди",
       running: "Выполняется",
+      pause_requested: "Ставится на паузу",
+      paused: "На паузе",
       completed: "Готово",
       completed_with_errors: "Готово с ограничениями",
       failed: "Ошибка",
@@ -727,6 +763,15 @@
         hour: "2-digit",
         minute: "2-digit"
       }).format(new Date(value));
+    }
+
+    function formatDuration(seconds) {
+      const value = Math.max(0, Number(seconds) || 0);
+      const minutes = Math.floor(value / 60);
+      const remainder = value % 60;
+      return minutes
+        ? `${minutes} мин ${remainder} сек`
+        : `${remainder} сек`;
     }
 
     function statusClass(run) {
@@ -986,8 +1031,11 @@
       selectedRunId = runId;
       renderLibrary();
       try {
-        const run = await request(`/api/v1/runs/${runId}`);
-        renderDetails(run);
+        const [run, progress] = await Promise.all([
+          request(`/api/v1/runs/${runId}`),
+          request(`/api/v1/runs/${runId}/progress`)
+        ]);
+        renderDetails(run, progress);
         if (run.unread_result) {
           await request(`/api/v1/runs/${runId}/read`, {method: "POST"});
           const cached = allRuns.find(item => item.id === runId);
@@ -1001,7 +1049,123 @@
       }
     }
 
-    function renderDetails(run) {
+    function renderProgress(run, progress) {
+      const card = element("section", undefined, "progress-card");
+      card.setAttribute("aria-label", "Ход исследования");
+      card.append(
+        element("h3", "Ход исследования"),
+        element("p", progress.activity, "muted")
+      );
+      const time = element("p", undefined, "muted small");
+      time.textContent = `Прошло: ${formatDuration(progress.elapsed_seconds)}`;
+      if (progress.remaining_seconds_upper_bound !== null) {
+        time.textContent +=
+          ` · верхняя оценка остатка: ` +
+          formatDuration(progress.remaining_seconds_upper_bound);
+      }
+      card.append(time);
+
+      const counters = element("div", undefined, "progress-counters");
+      const values = [
+        [
+          "Направления",
+          `${progress.counters.directions.completed} / ` +
+            `${progress.counters.directions.total}`
+        ],
+        ["Источники", String(progress.counters.sources)],
+        [
+          "Проверки",
+          `${progress.counters.verifications.completed} / ` +
+            `${progress.counters.verifications.total}`
+        ]
+      ];
+      for (const [label, value] of values) {
+        const counter = element("div", undefined, "progress-counter");
+        counter.append(element("strong", value), element("span", label));
+        counters.append(counter);
+      }
+      card.append(counters);
+
+      if (
+        run.can_manage &&
+        currentIdentity.capabilities.control_run
+      ) {
+        const actions = element("div", undefined, "detail-actions");
+        const controls = [
+          ["can_pause", "Поставить на паузу", "pause"],
+          ["can_resume", "Продолжить", "resume"],
+          ["can_finish", "Завершить на собранном", "finish"]
+        ];
+        for (const [flag, label, action] of controls) {
+          if (!progress.actions[flag]) continue;
+          const button = element(
+            "button",
+            label,
+            action === "resume" ? "primary-button" : "quiet-button"
+          );
+          button.type = "button";
+          button.addEventListener("click", async () => {
+            if (
+              action === "finish" &&
+              !confirm(
+                "Собрать отчёт только из уже сохранённых результатов?"
+              )
+            ) return;
+            button.disabled = true;
+            try {
+              await request(`/api/v1/runs/${run.id}/${action}`, {
+                method: "POST",
+                idempotent: true
+              });
+              await loadRuns();
+              await openRun(run.id);
+            } catch (error) {
+              messageNode.textContent = error.message;
+              button.disabled = false;
+            }
+          });
+          actions.append(button);
+        }
+        if (actions.children.length) card.append(actions);
+      }
+
+      if (progress.technical) {
+        const technical = document.createElement("details");
+        technical.className = "technical-details";
+        technical.append(
+          element("summary", "Технические ошибки и повторы"),
+          element(
+            "p",
+            `Попыток выполнения: ${progress.technical.work_attempts}`,
+            "small"
+          )
+        );
+        if (progress.technical.last_error) {
+          technical.append(
+            element(
+              "p",
+              `Последняя ошибка: ${progress.technical.last_error}`,
+              "error small"
+            )
+          );
+        }
+        for (const event of progress.technical.events) {
+          technical.append(
+            element(
+              "p",
+              `${event.status} · ${event.operation}` +
+                `${event.attempt ? ` · попытка ${event.attempt}` : ""}` +
+                `${event.error_code ? ` · ${event.error_code}` : ""}`,
+              "technical-event"
+            )
+          );
+        }
+        card.append(technical);
+      }
+      return card;
+    }
+
+    function renderDetails(run, progress) {
       detailsNode.replaceChildren();
       detailsNode.append(
         element("p", "Исследование", "eyebrow"),
@@ -1015,6 +1179,7 @@
       detailsNode.append(meta);
       const question = element("div", run.question, "details-question");
       detailsNode.append(question);
+      detailsNode.append(renderProgress(run, progress));
 
       if (run.can_manage) {
         const form = element("form", undefined, "title-form");
@@ -1463,15 +1628,25 @@
       }
     });
 
-    setInterval(() => {
+    let refreshing = false;
+    setInterval(async () => {
       if (
         currentIdentity &&
         !document.hidden &&
+        !refreshing &&
         allRuns.some(run => run.group === "active")
       ) {
-        loadRuns().catch(error => messageNode.textContent = error.message);
+        refreshing = true;
+        try {
+          await loadRuns();
+          if (selectedRunId) await openRun(selectedRunId);
+        } catch (error) {
+          messageNode.textContent = error.message;
+        } finally {
+          refreshing = false;
+        }
       }
-    }, 15000);
+    }, 5000);
 
     request("/api/v1/auth/session")
       .then(showWorkspace)

@@ -94,11 +94,15 @@ def create_plan(state: ResearchState) -> dict:
                 "assumptions": [],
             }
 
-        runnable_tasks = [
-            task
-            for task in tasks
-            if task.status != TaskStatus.COMPLETED
-        ]
+        runnable_tasks = (
+            []
+            if state.get("finish_early", False)
+            else [
+                task
+                for task in tasks
+                if task.status != TaskStatus.COMPLETED
+            ]
+        )
         completed_tasks = [
             task
             for task in tasks
