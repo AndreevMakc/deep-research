@@ -547,6 +547,37 @@
       line-height: 1.6;
     }
     .source-meta { display: grid; gap: 7px; font-size: .84rem; }
+    .recheck-panel {
+      margin-top: 28px;
+      border-top: 1px solid var(--line);
+      padding-top: 20px;
+    }
+    .recheck-panel h3 { margin: 0 0 8px; }
+    .recheck-status {
+      margin: 12px 0;
+      border-radius: 12px;
+      background: #f7faf5;
+      padding: 12px;
+      font-size: .84rem;
+      line-height: 1.5;
+    }
+    .recheck-status.active { background: #fbf3e4; color: #704b12; }
+    .recheck-status.failed { background: #f6e7e4; color: var(--red); }
+    .provenance-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px 16px;
+      margin: 10px 0;
+      font-size: .8rem;
+    }
+    .provenance-grid div { overflow-wrap: anywhere; }
+    .provenance-grid strong {
+      display: block;
+      color: var(--muted);
+      font-size: .7rem;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+    }
     body.report-focus .topbar,
     body.report-focus #composer,
     body.report-focus #library-panel { display: none; }
@@ -864,6 +895,7 @@
     let selectedGroup = "active";
     let activeReadingRunId = null;
     let sourceDrawerTrigger = null;
+    let sourceDrawerClaimId = null;
 
     const groups = [
       ["active", "Активные"],
@@ -1400,12 +1432,197 @@
     function closeSourceDrawer() {
       sourceDrawer.hidden = true;
       sourceDrawer.replaceChildren();
+      sourceDrawerClaimId = null;
       if (sourceDrawerTrigger) sourceDrawerTrigger.focus();
       sourceDrawerTrigger = null;
     }
 
+    const recheckCategoryLabels = {
+      evidence_incorrect: "Цитата не подтверждает вывод",
+      source_outdated: "Источник устарел",
+      source_unavailable: "Источник недоступен",
+      other: "Другая проблема"
+    };
+
+    async function renderRecheckHistory(claimId, container) {
+      if (
+        sourceDrawerClaimId !== claimId ||
+        sourceDrawer.hidden
+      ) return;
+      try {
+        const history = await request(
+          `/api/v1/claims/${claimId}/rechecks`
+        );
+        container.replaceChildren();
+        const latest = history[0];
+        if (!latest) {
+          const form = container.parentElement?.querySelector("form");
+          if (form) form.hidden = false;
+          container.append(
+            element(
+              "p",
+              "Перепроверок этого вывода пока не было.",
+              "muted small"
+            )
+          );
+          return;
+        }
+        const statusLabels = {
+          queued: "Перепроверяется · ожидает worker",
+          running: "Перепроверяется · источник и claim проверяются",
+          completed: "Перепроверка завершена",
+          failed: "Перепроверка не завершена"
+        };
+        const form = container.parentElement?.querySelector("form");
+        if (form) {
+          form.hidden = ["queued", "running"].includes(
+            latest.status
+          );
+        }
+        const statusNode = element(
+          "div",
+          statusLabels[latest.status] || latest.status,
+          `recheck-status ${
+            ["queued", "running"].includes(latest.status)
+              ? "active"
+              : latest.status === "failed"
+                ? "failed"
+                : ""
+          }`
+        );
+        container.append(statusNode);
+        const summary = element("p", undefined, "small");
+        summary.textContent =
+          `${recheckCategoryLabels[latest.category] || latest.category}` +
+          ` · ${latest.requested_by}`;
+        container.append(summary);
+        if (latest.comment) {
+          container.append(
+            element("p", latest.comment, "muted small")
+          );
+        }
+        if (latest.status === "completed") {
+          const verdictLabels = {
+            supported: "подтверждено",
+            partially_supported: "подтверждено частично",
+            contradicted: "противоречит доказательствам",
+            source_unavailable: "источник недоступен",
+            citation_mismatch: "цитата не совпала",
+            insufficient_evidence: "недостаточно доказательств",
+            out_of_scope: "вне охвата"
+          };
+          container.append(
+            element(
+              "p",
+              `Результат: ${
+                verdictLabels[latest.result_verdict] ||
+                latest.result_verdict ||
+                "нет verdict"
+              }. ${
+                latest.material_changed
+                  ? `Создана версия отчёта ${latest.report_version_number}.`
+                  : "Итоговый отчёт не изменился."
+              }`,
+              "small"
+            )
+          );
+        }
+        if (latest.error) {
+          container.append(
+            element("p", latest.error, "error small")
+          );
+        }
+        if (
+          ["queued", "running"].includes(latest.status) &&
+          sourceDrawerClaimId === claimId
+        ) {
+          setTimeout(
+            () => renderRecheckHistory(claimId, container),
+            2000
+          );
+        }
+      } catch (error) {
+        container.replaceChildren(
+          element("p", error.message, "error small")
+        );
+      }
+    }
+
+    function renderRecheckPanel(source) {
+      const panel = element("section", undefined, "recheck-panel");
+      panel.append(
+        element("h3", "Перепроверить вывод"),
+        element(
+          "p",
+          "Система повторно загрузит источник и проверит только этот " +
+            "claim и связанные с тем же snapshot выводы.",
+          "muted small"
+        )
+      );
+      const history = element("div");
+      panel.append(history);
+      renderRecheckHistory(source.claim_id, history);
+
+      const form = element("form");
+      const categoryLabel = element("label", "Что вызывает сомнение");
+      const category = element("select");
+      for (const [value, label] of Object.entries(
+        recheckCategoryLabels
+      )) {
+        const option = element("option", label);
+        option.value = value;
+        category.append(option);
+      }
+      categoryLabel.append(category);
+      const commentLabel = element("label", "Комментарий");
+      const comment = element("textarea");
+      comment.minLength = 3;
+      comment.maxLength = 5000;
+      comment.placeholder = "Опишите, что именно стоит проверить";
+      commentLabel.append(comment);
+      const submit = element(
+        "button",
+        "Проверить этот вывод",
+        "primary-button"
+      );
+      submit.type = "submit";
+      form.append(categoryLabel, commentLabel, submit);
+      form.addEventListener("submit", async event => {
+        event.preventDefault();
+        submit.disabled = true;
+        submit.textContent = "Ставим в очередь…";
+        try {
+          await request(
+            `/api/v1/claims/${source.claim_id}/rechecks`,
+            {
+              method: "POST",
+              idempotent: true,
+              body: JSON.stringify({
+                category: category.value,
+                comment: comment.value.trim() || null
+              })
+            }
+          );
+          form.hidden = true;
+          await renderRecheckHistory(
+            source.claim_id,
+            history
+          );
+        } catch (error) {
+          history.replaceChildren(
+            element("p", error.message, "error small")
+          );
+          submit.disabled = false;
+          submit.textContent = "Проверить этот вывод";
+        }
+      });
+      panel.append(form);
+      return panel;
+    }
+
     function openSourceDrawer(source, trigger) {
       sourceDrawerTrigger = trigger;
+      sourceDrawerClaimId = source.claim_id;
       sourceDrawer.replaceChildren();
       const header = element("header");
       const heading = element("div");
@@ -1472,7 +1689,7 @@
       if (source.source_publisher) {
         meta.append(element("div", `Издатель: ${source.source_publisher}`));
       }
-      sourceDrawer.append(meta);
+      sourceDrawer.append(meta, renderRecheckPanel(source));
       sourceDrawer.hidden = false;
       close.focus();
     }
@@ -1851,26 +2068,85 @@
           const card = element("div", undefined, "claim");
           card.append(
             element("strong", claim.text),
-            element("div", `${claim.status} · ${claim.review_status}`, "muted small")
+            element(
+              "div",
+              claim.verification
+                ? `${claim.verification.verdict} · ` +
+                  `${Math.round(claim.verification.confidence * 100)}%`
+                : "Технический verdict отсутствует",
+              "muted small"
+            )
           );
-          if (currentIdentity.capabilities.review_claim) {
-            const actions = element("div", undefined, "claim-actions");
-            for (const decision of ["approve", "reject", "research"]) {
-              const button = element("button", decision, "quiet-button");
-              button.type = "button";
-              button.addEventListener("click", async () => {
-                const reason = prompt("Причина решения:");
-                if (!reason) return;
-                await request(`/api/v1/claims/${claim.id}/review`, {
-                  method: "POST",
-                  idempotent: true,
-                  body: JSON.stringify({decision, reason})
-                });
-                await loadProvenance(runId);
-              });
-              actions.append(button);
-            }
-            card.append(actions);
+          const grid = element("div", undefined, "provenance-grid");
+          const fields = [
+            [
+              "Snapshot",
+              claim.source_snapshot?.id || "нет"
+            ],
+            [
+              "SHA-256",
+              claim.source_snapshot?.content_hash || "нет"
+            ],
+            [
+              "Locator",
+              JSON.stringify(claim.locator || {})
+            ],
+            [
+              "Координаты",
+              claim.quote_start === null
+                ? "нет"
+                : `${claim.quote_start}–${claim.quote_end}`
+            ],
+            [
+              "Получено",
+              claim.source_snapshot?.retrieved_at
+                ? formatDate(claim.source_snapshot.retrieved_at)
+                : "нет"
+            ],
+            [
+              "MIME",
+              claim.source_snapshot?.mime_type || "нет"
+            ]
+          ];
+          for (const [label, value] of fields) {
+            const field = element("div");
+            field.append(
+              element("strong", label),
+              element("span", value)
+            );
+            grid.append(field);
+          }
+          card.append(grid);
+          if (claim.evidence_quote) {
+            card.append(
+              element(
+                "blockquote",
+                claim.evidence_quote,
+                "source-quote"
+              )
+            );
+          }
+          if (claim.verification?.reason) {
+            card.append(
+              element(
+                "p",
+                `Основание verdict: ${claim.verification.reason}`,
+                "muted small"
+              )
+            );
+          }
+          if (claim.rechecks.length) {
+            const latest = claim.rechecks[0];
+            card.append(
+              element(
+                "p",
+                `Последняя перепроверка: ${latest.status}` +
+                  `${latest.result_verdict
+                    ? ` · ${latest.result_verdict}`
+                    : ""}`,
+                "muted small"
+              )
+            );
           }
           container.append(card);
         }

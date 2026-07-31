@@ -30,24 +30,39 @@ def execute_work_item(
     worker_id: str,
     lease_seconds: int,
 ) -> bool:
-    if item.kind != "execute_research_run":
+    if item.kind == "execute_research_run":
+        command = [
+            sys.executable,
+            "-m",
+            "app.main",
+            "--resume",
+            str(item.run_id),
+        ]
+        finish_early = bool(
+            item.payload.get("finish_early")
+        )
+
+        if finish_early:
+            command.append("--finish-early")
+    elif item.kind == "recheck_claim":
+        recheck_id = item.payload.get("recheck_id")
+
+        if not recheck_id:
+            raise RuntimeError(
+                "Claim recheck work item has no recheck_id"
+            )
+
+        command = [
+            sys.executable,
+            "-m",
+            "app.rechecks",
+            recheck_id,
+        ]
+        finish_early = False
+    else:
         raise RuntimeError(
             f"Unsupported work kind: {item.kind}"
         )
-
-    command = [
-        sys.executable,
-        "-m",
-        "app.main",
-        "--resume",
-        str(item.run_id),
-    ]
-    finish_early = bool(
-        item.payload.get("finish_early")
-    )
-
-    if finish_early:
-        command.append("--finish-early")
 
     process = subprocess.Popen(command)
     heartbeat_interval = min(

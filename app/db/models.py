@@ -68,6 +68,20 @@ class VerificationVerdict(str, enum.Enum):
     INSUFFICIENT_EVIDENCE = "insufficient_evidence"
 
 
+class ClaimRecheckStatus(str, enum.Enum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class ClaimRecheckCategory(str, enum.Enum):
+    EVIDENCE_INCORRECT = "evidence_incorrect"
+    SOURCE_OUTDATED = "source_outdated"
+    SOURCE_UNAVAILABLE = "source_unavailable"
+    OTHER = "other"
+
+
 class ClaimReviewStatus(str, enum.Enum):
     PENDING = "pending"
     APPROVED = "approved"
@@ -293,6 +307,20 @@ class ResearchRun(Base):
     )
 
     views: Mapped[list["ResearchRunView"]] = relationship(
+        back_populates="run",
+        cascade="all, delete-orphan",
+    )
+
+    claim_rechecks: Mapped[
+        list["ClaimRecheckRequest"]
+    ] = relationship(
+        back_populates="run",
+        cascade="all, delete-orphan",
+    )
+
+    report_versions: Mapped[
+        list["ResearchReportVersion"]
+    ] = relationship(
         back_populates="run",
         cascade="all, delete-orphan",
     )
@@ -1007,6 +1035,154 @@ class Verification(Base):
     )
 
 
+class ClaimRecheckRequest(Base):
+    __tablename__ = "claim_recheck_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("research_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    claim_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("claims.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    requested_by_identity_id: Mapped[
+        uuid.UUID | None
+    ] = mapped_column(
+        ForeignKey(
+            "api_identities.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
+    )
+
+    requested_by: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+
+    category: Mapped[ClaimRecheckCategory] = mapped_column(
+        Enum(
+            ClaimRecheckCategory,
+            name="claim_recheck_category",
+        ),
+        nullable=False,
+    )
+
+    comment: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    status: Mapped[ClaimRecheckStatus] = mapped_column(
+        Enum(
+            ClaimRecheckStatus,
+            name="claim_recheck_status",
+        ),
+        nullable=False,
+        default=ClaimRecheckStatus.QUEUED,
+        index=True,
+    )
+
+    original_snapshot_id: Mapped[
+        uuid.UUID | None
+    ] = mapped_column(
+        ForeignKey(
+            "source_snapshots.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
+
+    result_snapshot_id: Mapped[
+        uuid.UUID | None
+    ] = mapped_column(
+        ForeignKey(
+            "source_snapshots.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
+
+    original_verdict: Mapped[
+        VerificationVerdict | None
+    ] = mapped_column(
+        Enum(
+            VerificationVerdict,
+            name="verification_verdict",
+        ),
+        nullable=True,
+    )
+
+    result_verdict: Mapped[
+        VerificationVerdict | None
+    ] = mapped_column(
+        Enum(
+            VerificationVerdict,
+            name="verification_verdict",
+        ),
+        nullable=True,
+    )
+
+    material_changed: Mapped[bool | None] = mapped_column(
+        Boolean,
+        nullable=True,
+    )
+
+    report_version_number: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    details_json: Mapped[dict] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+    )
+
+    error: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    run: Mapped["ResearchRun"] = relationship(
+        back_populates="claim_rechecks"
+    )
+
+
 class ResearchReport(Base):
     __tablename__ = "research_reports"
     __table_args__ = (
@@ -1090,6 +1266,80 @@ class ResearchReport(Base):
 
     run: Mapped["ResearchRun"] = relationship(
         back_populates="report"
+    )
+
+
+class ResearchReportVersion(Base):
+    __tablename__ = "research_report_versions"
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "version_number",
+            name="uq_research_report_version_run_number",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("research_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    claim_recheck_id: Mapped[
+        uuid.UUID | None
+    ] = mapped_column(
+        ForeignKey(
+            "claim_recheck_requests.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
+    )
+
+    version_number: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    reason: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+
+    requested_by: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    markdown_hash: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+    )
+
+    json_hash: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+    )
+
+    result_json: Mapped[dict] = mapped_column(
+        JSONB,
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    run: Mapped["ResearchRun"] = relationship(
+        back_populates="report_versions"
     )
 
 
