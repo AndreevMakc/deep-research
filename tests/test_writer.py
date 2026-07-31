@@ -10,6 +10,7 @@ from app.agents.writer import (
 from app.db.models import VerificationVerdict
 from app.schemas.writer import (
     CitedStatement,
+    ReportFinding,
     ReportSection,
     WriterClaimEvidence,
     WriterDraft,
@@ -312,7 +313,13 @@ class WriterTests(unittest.TestCase):
             claim_ids=["claim-1"],
         )
         draft = WriterDraft(
-            short_answer=[statement],
+            direct_answer=statement,
+            key_findings=[
+                ReportFinding(
+                    title="Verified processing",
+                    statement=statement,
+                )
+            ],
             sections=[
                 ReportSection(
                     heading="Evidence",
@@ -326,11 +333,33 @@ class WriterTests(unittest.TestCase):
         markdown = render_report_markdown(report)
 
         self.assertEqual(report.overall_confidence, 0.9)
+        self.assertEqual(report.direct_answer, statement)
+        self.assertEqual(
+            report.key_findings[0].title,
+            "Verified processing",
+        )
+        self.assertEqual(
+            report.quality_summary.confirmed_claims,
+            1,
+        )
+        self.assertEqual(
+            report.quality_summary.source_count,
+            1,
+        )
         self.assertEqual(len(report.sources), 1)
+        self.assertEqual(
+            report.sources[0].verdict,
+            VerificationVerdict.SUPPORTED,
+        )
+        self.assertIn(
+            "directly supports",
+            report.sources[0].verification_reason,
+        )
         self.assertIn(
             "[C1](https://example.com/claim-1)",
             markdown,
         )
+        self.assertIn("## Ключевые выводы", markdown)
         self.assertIn(
             "source_snapshot_id=snapshot-claim-1",
             markdown,

@@ -24,8 +24,10 @@ from sqlalchemy import func, select
 from app.db.models import (
     ApiRole,
     ResearchDraft,
+    ResearchReport,
     ResearchRun,
     ReviewerIdentity,
+    RunStatus,
     Tenant,
     WorkItem,
 )
@@ -426,6 +428,143 @@ class DashboardBrowserTests(unittest.TestCase):
             self.assertIsNotNone(draft)
             self.assertEqual(draft.scope, unsaved_scope)
             self.assertEqual(draft.revision, 3)
+
+    def test_reads_partial_editorial_report_and_citation(
+        self,
+    ) -> None:
+        with SessionFactory() as session:
+            run = ResearchRun(
+                tenant_id=self.tenant_id,
+                created_by_identity_id=self.identity_id,
+                question="Какой результат подтверждён?",
+                title="Редакционный отчёт",
+                status=RunStatus.COMPLETED_WITH_ERRORS,
+            )
+            session.add(run)
+            session.flush()
+            statement = {
+                "text": "Подтверждён доступный частичный результат.",
+                "claim_ids": ["claim-1"],
+                "qualification": (
+                    "Один дополнительный источник недоступен."
+                ),
+            }
+            source = {
+                "citation_label": "C1",
+                "claim_id": "claim-1",
+                "source_snapshot_id": "snapshot-1",
+                "source_url": "https://example.com/evidence",
+                "source_title": "Проверенный источник",
+                "source_publisher": "Example",
+                "source_published_at": (
+                    "2026-07-20T00:00:00Z"
+                ),
+                "source_retrieved_at": (
+                    "2026-07-30T00:00:00Z"
+                ),
+                "evidence_quote": (
+                    "Точная цитата подтверждает доступный результат."
+                ),
+                "verdict": "partially_supported",
+                "confidence": 0.82,
+                "verification_reason": (
+                    "Цитата прямо подтверждает узкую часть вывода."
+                ),
+            }
+            session.add(
+                ResearchReport(
+                    run_id=run.id,
+                    markdown_path="report.md",
+                    json_path="report.json",
+                    markdown_hash="a" * 64,
+                    json_hash="b" * 64,
+                    result_json={
+                        "run_id": str(run.id),
+                        "question": run.question,
+                        "direct_answer": statement,
+                        "key_findings": [
+                            {
+                                "title": "Доступный результат",
+                                "statement": statement,
+                            }
+                        ],
+                        "short_answer": [],
+                        "sections": [
+                            {
+                                "heading": "Полный анализ",
+                                "statements": [statement],
+                            }
+                        ],
+                        "limitations": [
+                            "Не все источники были доступны."
+                        ],
+                        "contradictions": [],
+                        "unanswered_questions": [
+                            "Что содержал недоступный источник?"
+                        ],
+                        "sources": [source],
+                        "overall_confidence": 0.82,
+                        "quality_summary": {
+                            "confirmed_claims": 0,
+                            "limited_claims": 1,
+                            "contradicted_claims": 0,
+                            "unsupported_claims": 0,
+                            "source_count": 1,
+                            "overall_confidence": 0.82,
+                            "caveats": [
+                                "Не все источники были доступны."
+                            ],
+                        },
+                    },
+                )
+            )
+            run_id = str(run.id)
+            session.commit()
+
+        self._login()
+        self.page.get_by_role(
+            "button",
+            name="Редакционный отчёт",
+        ).click()
+        expect(self.page.locator(".partial-banner")).to_be_visible()
+        expect(self.page.locator("#report-answer")).to_contain_text(
+            "Подтверждён доступный частичный результат."
+        )
+        expect(self.page.locator("#report-quality")).to_contain_text(
+            "82%"
+        )
+        expect(self.page.locator(".evidence-badge").first).to_have_text(
+            "Ограничено"
+        )
+
+        citation = self.page.get_by_role(
+            "button",
+            name="Открыть источник C1",
+        ).first
+        citation.click()
+        expect(self.page.locator("#source-drawer")).to_be_visible()
+        expect(self.page.locator("#source-drawer")).to_contain_text(
+            "Точная цитата подтверждает доступный результат."
+        )
+        expect(self.page.locator("#source-drawer")).to_contain_text(
+            "Цитата прямо подтверждает узкую часть вывода."
+        )
+        self.page.get_by_role(
+            "button",
+            name="Закрыть",
+        ).click()
+
+        self.page.get_by_role(
+            "button",
+            name="Фокусный режим",
+        ).click()
+        expect(self.page.locator("#library-panel")).to_be_hidden()
+        self.page.evaluate("window.scrollTo(0, 300)")
+        self.page.wait_for_timeout(50)
+        saved = self.page.evaluate(
+            f"localStorage.getItem('deep-research:reading:{run_id}')"
+        )
+        self.assertIsNotNone(saved)
 
     def test_materials_and_advanced_settings_reach_run(
         self,

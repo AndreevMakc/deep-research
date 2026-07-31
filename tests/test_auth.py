@@ -432,7 +432,9 @@ class BrowserAuthenticationTests(unittest.TestCase):
             with SessionFactory() as session:
                 run = session.get(ResearchRun, run_id)
                 self.assertIsNotNone(run)
-                run.status = RunStatus.COMPLETED
+                run.status = (
+                    RunStatus.COMPLETED_WITH_ERRORS
+                )
                 run.updated_at = datetime.now(timezone.utc)
                 session.add(
                     ResearchReport(
@@ -446,6 +448,17 @@ class BrowserAuthenticationTests(unittest.TestCase):
                 )
                 session.commit()
 
+            detail = researcher_client.get(
+                f"/api/v1/runs/{run_id}"
+            )
+            self.assertEqual(detail.status_code, 200)
+            self.assertTrue(
+                detail.json()["report"]["partial"]
+            )
+            self.assertEqual(
+                detail.json()["report"]["result"],
+                {"summary": "Ready"},
+            )
             researcher_library = researcher_client.get(
                 "/api/v1/runs"
             ).json()

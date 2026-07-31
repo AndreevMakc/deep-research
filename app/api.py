@@ -1958,7 +1958,7 @@ def get_run(
 ) -> dict:
     _require(identity, "view")
     run = _tenant_run(session, identity, run_id)
-    return _library_run_payload(
+    payload = _library_run_payload(
         run,
         result_seen_at=_run_seen_at(
             session,
@@ -1970,6 +1970,21 @@ def get_run(
             run,
         ),
     )
+    report = get_research_report(session, run.id)
+    payload["report"] = (
+        None
+        if report is None
+        else {
+            "review_status": report.review_status.value,
+            "updated_at": report.updated_at,
+            "partial": (
+                run.status
+                == RunStatus.COMPLETED_WITH_ERRORS
+            ),
+            "result": report.result_json,
+        }
+    )
+    return payload
 
 
 @app.get("/api/v1/runs/{run_id}/progress")
