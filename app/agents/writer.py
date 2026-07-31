@@ -30,7 +30,9 @@ from app.resilience import (
 )
 from app.schemas.writer import (
     CitedStatement,
+    EvidenceQualitySummary,
     FinalResearchReport,
+    ReportFinding,
     ReportSource,
     WriterClaimEvidence,
     WriterDraft,
@@ -108,6 +110,21 @@ def build_writer_packet(
             source_title=(
                 source.title
                 if source is not None
+                else None
+            ),
+            source_publisher=(
+                source.publisher
+                if source is not None
+                else None
+            ),
+            source_published_at=(
+                source.published_at
+                if source is not None
+                else None
+            ),
+            source_retrieved_at=(
+                snapshot.retrieved_at
+                if snapshot is not None
                 else None
             ),
         )
@@ -280,6 +297,15 @@ def validate_writer_draft(
         )
     )
     main_statements = [
+        *(
+            [draft.direct_answer]
+            if draft.direct_answer is not None
+            else []
+        ),
+        *[
+            finding.statement
+            for finding in draft.key_findings
+        ],
         *draft.short_answer,
         *[
             statement
@@ -428,10 +454,40 @@ def finalize_report(
             *packet.rejected_claims,
         ]
     }
+    direct_answer = (
+        draft.direct_answer
+        or (
+            draft.short_answer[0]
+            if draft.short_answer
+            else None
+        )
+    )
+    key_findings = (
+        draft.key_findings
+        or [
+            ReportFinding(
+                title=f"Ключевой вывод {index}",
+                statement=statement,
+            )
+            for index, statement in enumerate(
+                draft.short_answer[1:],
+                start=1,
+            )
+        ]
+    )
     cited_ids = list(
         dict.fromkeys(
             claim_id
             for statement in [
+                *(
+                    [direct_answer]
+                    if direct_answer is not None
+                    else []
+                ),
+                *[
+                    finding.statement
+                    for finding in key_findings
+                ],
                 *draft.short_answer,
                 *[
                     statement
@@ -454,8 +510,22 @@ def finalize_report(
             source_title=(
                 claims_by_id[claim_id].source_title
             ),
+            source_publisher=(
+                claims_by_id[claim_id].source_publisher
+            ),
+            source_published_at=(
+                claims_by_id[claim_id].source_published_at
+            ),
+            source_retrieved_at=(
+                claims_by_id[claim_id].source_retrieved_at
+            ),
             evidence_quote=(
                 claims_by_id[claim_id].evidence_quote
+            ),
+            verdict=claims_by_id[claim_id].verdict,
+            confidence=claims_by_id[claim_id].confidence,
+            verification_reason=(
+                claims_by_id[claim_id].verification_reason
             ),
         )
         for index, claim_id in enumerate(
@@ -517,10 +587,66 @@ def finalize_report(
             ]
         )
     )
+    cited_claims = [
+        claims_by_id[claim_id]
+        for claim_id in cited_ids
+    ]
+    unsupported_verdicts = {
+        VerificationVerdict.OUT_OF_SCOPE,
+        VerificationVerdict.SOURCE_UNAVAILABLE,
+        VerificationVerdict.CITATION_MISMATCH,
+        VerificationVerdict.INSUFFICIENT_EVIDENCE,
+    }
+    quality_summary = EvidenceQualitySummary(
+        confirmed_claims=sum(
+            claim.verdict == VerificationVerdict.SUPPORTED
+            for claim in cited_claims
+        ),
+        limited_claims=sum(
+            claim.verdict
+            == VerificationVerdict.PARTIALLY_SUPPORTED
+            for claim in cited_claims
+        ),
+        contradicted_claims=sum(
+            claim.verdict == VerificationVerdict.CONTRADICTED
+            for claim in cited_claims
+        ),
+        unsupported_claims=sum(
+            claim.verdict in unsupported_verdicts
+            for claim in cited_claims
+        ),
+        source_count=len(
+            {
+                (
+                    claim.source_snapshot_id
+                    or claim.source_url
+                )
+                for claim in cited_claims
+                if (
+                    claim.source_snapshot_id
+                    or claim.source_url
+                )
+            }
+        ),
+        overall_confidence=round(
+            overall_confidence,
+            4,
+        ),
+        caveats=list(
+            dict.fromkeys(
+                [
+                    *limitations,
+                    *unanswered,
+                ]
+            )
+        ),
+    )
 
     return FinalResearchReport(
         run_id=packet.run_id,
         question=packet.question,
+        direct_answer=direct_answer,
+        key_findings=key_findings,
         short_answer=draft.short_answer,
         sections=draft.sections,
         limitations=limitations,
@@ -531,6 +657,7 @@ def finalize_report(
             overall_confidence,
             4,
         ),
+        quality_summary=quality_summary,
     )
 
 
@@ -589,17 +716,26 @@ def render_report_markdown(
         "",
     ]
 
-    if report.short_answer:
-        for statement in report.short_answer:
-            lines.extend(
-                [
-                    _render_cited_statement(
-                        statement,
-                        sources_by_claim,
-                    ),
-                    "",
-                ]
-            )
+    if report.direct_answer:
+        lines.extend(
+            [
+                _render_cited_statement(
+                    report.direct_answer,
+                    sources_by_claim,
+                ),
+                "",
+            ]
+        )
+    elif report.short_answer:
+        lines.extend(
+            [
+                _render_cited_statement(
+                    report.short_answer[0],
+                    sources_by_claim,
+                ),
+                "",
+            ]
+        )
     else:
         lines.extend(
             [
@@ -608,6 +744,22 @@ def render_report_markdown(
                 "",
             ]
         )
+
+    if report.key_findings:
+        lines.extend(["## Ключевые выводы", ""])
+
+        for finding in report.key_findings:
+            lines.extend(
+                [
+                    f"### {finding.title}",
+                    "",
+                    _render_cited_statement(
+                        finding.statement,
+                        sources_by_claim,
+                    ),
+                    "",
+                ]
+            )
 
     for section in report.sections:
         lines.extend(
@@ -683,6 +835,12 @@ def render_report_markdown(
                     f"  > {source.evidence_quote}"
                     if source.evidence_quote
                     else "  > Цитата недоступна."
+                ),
+                (
+                    "  "
+                    f"Проверка: {source.verdict.value}, "
+                    f"уверенность {source.confidence:.0%}. "
+                    f"{source.verification_reason}"
                 ),
                 "",
             ]

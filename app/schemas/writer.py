@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 from app.db.models import VerificationVerdict
@@ -16,6 +18,9 @@ class WriterClaimEvidence(BaseModel):
     source_snapshot_id: str | None = None
     source_url: str | None = None
     source_title: str | None = None
+    source_publisher: str | None = None
+    source_published_at: datetime | None = None
+    source_retrieved_at: datetime | None = None
 
 
 class WriterPacket(BaseModel):
@@ -58,9 +63,24 @@ class ReportSection(BaseModel):
     )
 
 
+class ReportFinding(BaseModel):
+    """One scannable key finding in the editorial report."""
+
+    title: str = Field(
+        min_length=3,
+        max_length=200,
+    )
+    statement: CitedStatement
+
+
 class WriterDraft(BaseModel):
     """Schema-constrained output returned by the Writer LLM."""
 
+    direct_answer: CitedStatement | None = None
+    key_findings: list[ReportFinding] = Field(
+        default_factory=list,
+        max_length=8,
+    )
     short_answer: list[CitedStatement] = Field(
         default_factory=list,
         max_length=5,
@@ -89,7 +109,25 @@ class ReportSource(BaseModel):
     source_snapshot_id: str | None = None
     source_url: str | None = None
     source_title: str | None = None
+    source_publisher: str | None = None
+    source_published_at: datetime | None = None
+    source_retrieved_at: datetime | None = None
     evidence_quote: str | None = None
+    verdict: VerificationVerdict
+    confidence: float = Field(ge=0, le=1)
+    verification_reason: str
+
+
+class EvidenceQualitySummary(BaseModel):
+    """Aggregate trust signals shown before the long report."""
+
+    confirmed_claims: int = Field(ge=0)
+    limited_claims: int = Field(ge=0)
+    contradicted_claims: int = Field(ge=0)
+    unsupported_claims: int = Field(ge=0)
+    source_count: int = Field(ge=0)
+    overall_confidence: float = Field(ge=0, le=1)
+    caveats: list[str] = Field(default_factory=list)
 
 
 class FinalResearchReport(BaseModel):
@@ -97,6 +135,10 @@ class FinalResearchReport(BaseModel):
 
     run_id: str
     question: str
+    direct_answer: CitedStatement | None = None
+    key_findings: list[ReportFinding] = Field(
+        default_factory=list,
+    )
     short_answer: list[CitedStatement]
     sections: list[ReportSection]
     limitations: list[str]
@@ -104,3 +146,4 @@ class FinalResearchReport(BaseModel):
     unanswered_questions: list[str]
     sources: list[ReportSource]
     overall_confidence: float = Field(ge=0, le=1)
+    quality_summary: EvidenceQualitySummary

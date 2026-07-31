@@ -396,6 +396,166 @@
     .provenance { margin-top: 26px; border-top: 1px solid var(--line); padding-top: 20px; }
     .claim { padding: 13px 0; border-bottom: 1px solid var(--line); }
     .claim-actions { display: flex; gap: 7px; margin-top: 8px; }
+    .report-toolbar {
+      position: sticky;
+      top: 10px;
+      z-index: 4;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin: -10px -10px 28px;
+      padding: 10px;
+      border: 1px solid rgba(217, 222, 216, .9);
+      border-radius: 14px;
+      background: rgba(255, 253, 248, .94);
+      backdrop-filter: blur(12px);
+    }
+    .report-toolbar .muted { margin: 0; }
+    .partial-banner {
+      margin: 0 0 24px;
+      padding: 14px 16px;
+      border-left: 4px solid var(--amber);
+      border-radius: 8px;
+      background: #fbf3e4;
+      color: #704b12;
+      line-height: 1.5;
+    }
+    .report-document {
+      width: min(760px, 100%);
+      margin: 0 auto;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 1.04rem;
+      line-height: 1.75;
+    }
+    .report-document h3 {
+      margin: 48px 0 14px;
+      font-size: 1.65rem;
+      font-weight: 500;
+      letter-spacing: -.025em;
+    }
+    .report-document h4 {
+      margin: 26px 0 8px;
+      font-size: 1.08rem;
+    }
+    .direct-answer {
+      margin: 20px 0 28px;
+      padding: 24px;
+      border: 1px solid #b9c9c0;
+      border-radius: 16px;
+      background: #f7faf5;
+      font-size: 1.18rem;
+      line-height: 1.65;
+    }
+    .report-toc {
+      display: flex;
+      gap: 7px;
+      overflow-x: auto;
+      margin: 0 0 30px;
+      padding: 0 0 10px;
+      font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+    }
+    .report-toc a {
+      flex: 0 0 auto;
+      border-bottom: 1px solid #9bb2a7;
+      color: var(--green);
+      font-size: .8rem;
+      text-decoration: none;
+    }
+    .quality-summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      margin: 28px 0;
+      font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+    }
+    .quality-stat {
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface);
+      color: var(--muted);
+      font-size: .75rem;
+    }
+    .quality-stat strong {
+      display: block;
+      color: var(--ink);
+      font-size: 1.1rem;
+    }
+    .finding-card {
+      margin: 12px 0;
+      padding: 18px 20px;
+      border-left: 3px solid var(--green);
+      background: #f8faf6;
+    }
+    .finding-card h4 { margin-top: 0; }
+    .cited-statement { margin: 12px 0; }
+    .cited-statement p { margin: 0; }
+    .citation-button {
+      display: inline-flex;
+      align-items: center;
+      margin: 0 2px;
+      border: 0;
+      border-bottom: 1px solid currentColor;
+      background: transparent;
+      color: var(--green);
+      padding: 0 2px;
+      font: 700 .72rem/1.4 Inter, ui-sans-serif, system-ui, sans-serif;
+    }
+    .qualification {
+      margin-top: 10px;
+      color: var(--amber);
+      font: .84rem/1.5 Inter, ui-sans-serif, system-ui, sans-serif;
+    }
+    .evidence-badge {
+      display: inline-block;
+      margin-right: 6px;
+      border-radius: 999px;
+      padding: 3px 8px;
+      background: #f5ecd8;
+      color: var(--amber);
+      font: 700 .7rem/1.4 Inter, ui-sans-serif, system-ui, sans-serif;
+    }
+    .evidence-badge.contradicted { background: #f6e7e4; color: var(--red); }
+    .report-notes { padding-left: 21px; }
+    .source-drawer {
+      position: fixed;
+      z-index: 20;
+      inset: 0 0 0 auto;
+      width: min(430px, 100%);
+      overflow-y: auto;
+      border-left: 1px solid var(--line);
+      background: var(--surface);
+      box-shadow: -18px 0 55px rgba(31, 54, 44, .16);
+      padding: 28px;
+    }
+    .source-drawer header {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: start;
+    }
+    .source-drawer h2 {
+      margin: 4px 0 16px;
+      font: 500 1.65rem/1.2 Georgia, "Times New Roman", serif;
+    }
+    .source-quote {
+      margin: 22px 0;
+      padding: 18px;
+      border-left: 3px solid var(--green);
+      background: #f7faf5;
+      line-height: 1.6;
+    }
+    .source-meta { display: grid; gap: 7px; font-size: .84rem; }
+    body.report-focus .topbar,
+    body.report-focus #composer,
+    body.report-focus #library-panel { display: none; }
+    body.report-focus .workspace-grid {
+      display: block;
+      width: min(980px, 100%);
+      margin: 22px auto;
+    }
+    body.report-focus .details { box-shadow: none; }
     .muted { color: var(--muted); }
     .small { font-size: .82rem; }
     .error { color: var(--red); white-space: pre-wrap; }
@@ -409,6 +569,7 @@
       .draft-grid { grid-template-columns: 1fr; }
       .draft-field.wide { grid-column: auto; }
       .progress-counters { grid-template-columns: 1fr; }
+      .quality-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .details { min-height: 0; }
     }
     @media (prefers-reduced-motion: reduce) {
@@ -636,7 +797,8 @@
     </section>
 
     <main class="workspace-grid">
-      <section class="panel" aria-label="Библиотека исследований">
+      <section id="library-panel" class="panel"
+        aria-label="Библиотека исследований">
         <div class="panel-heading">
           <p class="eyebrow">Общее пространство</p>
           <h2>Библиотека</h2>
@@ -652,6 +814,8 @@
       </section>
     </main>
   </div>
+  <aside id="source-drawer" class="source-drawer" role="dialog"
+    aria-modal="true" aria-labelledby="source-drawer-title" hidden></aside>
 
   <script>
     const loginView = document.querySelector("#login-view");
@@ -662,6 +826,7 @@
     const runsNode = document.querySelector("#runs");
     const tabsNode = document.querySelector("#tabs");
     const detailsNode = document.querySelector("#details");
+    const sourceDrawer = document.querySelector("#source-drawer");
     const questionNode = document.querySelector("#question");
     const researchForm = document.querySelector("#research-form");
     const examplesNode = document.querySelector(".examples");
@@ -697,6 +862,8 @@
     let activeDraft = null;
     let selectedRunId = null;
     let selectedGroup = "active";
+    let activeReadingRunId = null;
+    let sourceDrawerTrigger = null;
 
     const groups = [
       ["active", "Активные"],
@@ -765,6 +932,15 @@
       }).format(new Date(value));
     }
 
+    function formatReportDate(value) {
+      if (!value) return "не указана";
+      return new Intl.DateTimeFormat("ru", {
+        day: "numeric",
+        month: "long",
+        year: "numeric"
+      }).format(new Date(value));
+    }
+
     function formatDuration(seconds) {
       const value = Math.max(0, Number(seconds) || 0);
       const minutes = Math.floor(value / 60);
@@ -783,6 +959,9 @@
     function showLogin() {
       currentIdentity = null;
       activeDraft = null;
+      activeReadingRunId = null;
+      document.body.classList.remove("report-focus");
+      sourceDrawer.hidden = true;
       workspace.hidden = true;
       loginView.hidden = false;
       document.querySelector("#password").value = "";
@@ -1165,6 +1344,412 @@
       return card;
     }
 
+    function normalizedReport(result) {
+      const sources = Array.isArray(result.sources) ? result.sources : [];
+      const directAnswer =
+        result.direct_answer || result.short_answer?.[0] || null;
+      const keyFindings = Array.isArray(result.key_findings)
+        ? result.key_findings
+        : (result.short_answer || []).slice(1).map((statement, index) => ({
+            title: `Ключевой вывод ${index + 1}`,
+            statement
+          }));
+      const unsupported = new Set([
+        "out_of_scope",
+        "source_unavailable",
+        "citation_mismatch",
+        "insufficient_evidence"
+      ]);
+      const quality = result.quality_summary || {
+        confirmed_claims: sources.filter(
+          source => source.verdict === "supported"
+        ).length,
+        limited_claims: sources.filter(
+          source => source.verdict === "partially_supported"
+        ).length,
+        contradicted_claims: sources.filter(
+          source => source.verdict === "contradicted"
+        ).length,
+        unsupported_claims: sources.filter(
+          source => unsupported.has(source.verdict)
+        ).length,
+        source_count: new Set(
+          sources.map(source =>
+            source.source_snapshot_id || source.source_url
+          ).filter(Boolean)
+        ).size,
+        overall_confidence: Number(result.overall_confidence) || 0,
+        caveats: [
+          ...(result.limitations || []),
+          ...(result.unanswered_questions || [])
+        ]
+      };
+      return {
+        ...result,
+        direct_answer: directAnswer,
+        key_findings: keyFindings,
+        sources,
+        quality_summary: quality,
+        sections: result.sections || [],
+        limitations: result.limitations || [],
+        contradictions: result.contradictions || [],
+        unanswered_questions: result.unanswered_questions || []
+      };
+    }
+
+    function closeSourceDrawer() {
+      sourceDrawer.hidden = true;
+      sourceDrawer.replaceChildren();
+      if (sourceDrawerTrigger) sourceDrawerTrigger.focus();
+      sourceDrawerTrigger = null;
+    }
+
+    function openSourceDrawer(source, trigger) {
+      sourceDrawerTrigger = trigger;
+      sourceDrawer.replaceChildren();
+      const header = element("header");
+      const heading = element("div");
+      heading.append(
+        element("p", source.citation_label || "Источник", "eyebrow"),
+        element(
+          "h2",
+          source.source_title || source.source_url || "Источник недоступен"
+        )
+      );
+      heading.lastElementChild.id = "source-drawer-title";
+      const close = element("button", "Закрыть", "quiet-button");
+      close.type = "button";
+      close.addEventListener("click", closeSourceDrawer);
+      header.append(heading, close);
+      sourceDrawer.append(header);
+
+      if (source.source_url) {
+        const link = element("a", "Открыть оригинал");
+        link.href = source.source_url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        sourceDrawer.append(link);
+      }
+      sourceDrawer.append(
+        element(
+          "blockquote",
+          source.evidence_quote || "Точная цитата недоступна.",
+          "source-quote"
+        )
+      );
+      const meta = element("div", undefined, "source-meta");
+      const verdictLabels = {
+        supported: "подтверждено",
+        partially_supported: "подтверждено частично",
+        contradicted: "противоречит доказательствам",
+        out_of_scope: "вне охвата",
+        source_unavailable: "источник недоступен",
+        citation_mismatch: "цитата не совпала",
+        insufficient_evidence: "недостаточно доказательств"
+      };
+      meta.append(
+        element(
+          "div",
+          `Связь с выводом: ${source.verification_reason || "не описана"}`
+        ),
+        element(
+          "div",
+          `Проверка: ${verdictLabels[source.verdict] || source.verdict || "нет данных"}`
+        ),
+        element(
+          "div",
+          `Уверенность: ${Math.round((Number(source.confidence) || 0) * 100)}%`
+        ),
+        element(
+          "div",
+          `Опубликовано: ${formatReportDate(source.source_published_at)}`
+        ),
+        element(
+          "div",
+          `Получено: ${formatReportDate(source.source_retrieved_at)}`
+        )
+      );
+      if (source.source_publisher) {
+        meta.append(element("div", `Издатель: ${source.source_publisher}`));
+      }
+      sourceDrawer.append(meta);
+      sourceDrawer.hidden = false;
+      close.focus();
+    }
+
+    function renderCitedStatement(statement, sourcesByClaim, kind = "") {
+      const container = element("div", undefined, "cited-statement");
+      const paragraph = element("p");
+      paragraph.append(document.createTextNode(statement.text || ""));
+      for (const claimId of statement.claim_ids || []) {
+        const source = sourcesByClaim.get(claimId);
+        if (!source) continue;
+        paragraph.append(document.createTextNode(" "));
+        const citation = element(
+          "button",
+          source.citation_label || "источник",
+          "citation-button"
+        );
+        citation.type = "button";
+        citation.setAttribute(
+          "aria-label",
+          `Открыть источник ${source.citation_label || ""}`.trim()
+        );
+        citation.addEventListener(
+          "click",
+          () => openSourceDrawer(source, citation)
+        );
+        paragraph.append(citation);
+      }
+      const citedSources = (statement.claim_ids || [])
+        .map(claimId => sourcesByClaim.get(claimId))
+        .filter(Boolean);
+      const limited =
+        Boolean(statement.qualification) ||
+        citedSources.some(
+          source => source.verdict === "partially_supported"
+        );
+      if (kind === "contradicted") {
+        container.append(
+          element("span", "Противоречие", "evidence-badge contradicted")
+        );
+      } else if (kind === "unsupported") {
+        container.append(
+          element("span", "Не подтверждено", "evidence-badge contradicted")
+        );
+      } else if (limited) {
+        container.append(
+          element("span", "Ограничено", "evidence-badge")
+        );
+      }
+      container.append(paragraph);
+      if (statement.qualification) {
+        container.append(
+          element(
+            "div",
+            `Оговорка: ${statement.qualification}`,
+            "qualification"
+          )
+        );
+      }
+      return container;
+    }
+
+    function reportSection(heading, id) {
+      const section = element("section");
+      section.id = id;
+      section.append(element("h3", heading));
+      return section;
+    }
+
+    function renderReport(run) {
+      const report = normalizedReport(run.report.result);
+      const sourcesByClaim = new Map(
+        report.sources.map(source => [source.claim_id, source])
+      );
+      const reader = element("article", undefined, "report-document");
+      reader.setAttribute("aria-label", "Отчёт исследования");
+
+      const toolbar = element("div", undefined, "report-toolbar");
+      toolbar.append(
+        element(
+          "p",
+          run.report.partial
+            ? "Доступен частичный результат"
+            : "Единый отчёт",
+          "muted small"
+        )
+      );
+      const focus = element(
+        "button",
+        document.body.classList.contains("report-focus")
+          ? "Выйти из фокусного режима"
+          : "Фокусный режим",
+        "quiet-button"
+      );
+      focus.type = "button";
+      focus.addEventListener("click", () => {
+        document.body.classList.toggle("report-focus");
+        focus.textContent = document.body.classList.contains("report-focus")
+          ? "Выйти из фокусного режима"
+          : "Фокусный режим";
+      });
+      toolbar.append(focus);
+      reader.append(toolbar);
+
+      if (run.report.partial) {
+        reader.append(
+          element(
+            "p",
+            "Исследование завершено с ограничениями. Ниже сохранён весь " +
+              "доступный подтверждённый результат; недостающие данные " +
+              "перечислены отдельно.",
+            "partial-banner"
+          )
+        );
+      }
+
+      const tocItems = [["report-answer", "Ответ"]];
+      if (report.key_findings.length) {
+        tocItems.push(["report-findings", "Выводы"]);
+      }
+      tocItems.push(["report-quality", "Качество"]);
+      report.sections.forEach((section, index) => {
+        tocItems.push([`report-section-${index}`, section.heading]);
+      });
+      if (
+        report.limitations.length ||
+        report.contradictions.length ||
+        report.unanswered_questions.length
+      ) {
+        tocItems.push(["report-caveats", "Оговорки"]);
+      }
+      if (report.sources.length) tocItems.push(["report-sources", "Источники"]);
+      const toc = element("nav", undefined, "report-toc");
+      toc.setAttribute("aria-label", "Оглавление отчёта");
+      for (const [id, label] of tocItems) {
+        const link = element("a", label);
+        link.href = `#${id}`;
+        toc.append(link);
+      }
+      reader.append(toc);
+
+      const answer = reportSection("Прямой ответ", "report-answer");
+      const answerCard = element("div", undefined, "direct-answer");
+      if (report.direct_answer) {
+        answerCard.append(
+          renderCitedStatement(report.direct_answer, sourcesByClaim)
+        );
+      } else {
+        answerCard.append(
+          element(
+            "p",
+            "Подтверждённых данных недостаточно для прямого ответа."
+          )
+        );
+      }
+      answer.append(answerCard);
+      reader.append(answer);
+
+      if (report.key_findings.length) {
+        const findings = reportSection(
+          "Ключевые выводы",
+          "report-findings"
+        );
+        for (const finding of report.key_findings) {
+          const card = element("div", undefined, "finding-card");
+          card.append(
+            element("h4", finding.title),
+            renderCitedStatement(finding.statement, sourcesByClaim)
+          );
+          findings.append(card);
+        }
+        reader.append(findings);
+      }
+
+      const quality = reportSection(
+        "Качество доказательств",
+        "report-quality"
+      );
+      const qualityGrid = element("div", undefined, "quality-summary");
+      const summary = report.quality_summary;
+      const qualityValues = [
+        ["Подтверждено", summary.confirmed_claims],
+        ["С оговорками", summary.limited_claims],
+        ["Источников", summary.source_count],
+        ["Уверенность", `${Math.round(summary.overall_confidence * 100)}%`]
+      ];
+      for (const [label, value] of qualityValues) {
+        const stat = element("div", undefined, "quality-stat");
+        stat.append(element("strong", String(value)), element("span", label));
+        qualityGrid.append(stat);
+      }
+      quality.append(qualityGrid);
+      reader.append(quality);
+
+      report.sections.forEach((reportData, index) => {
+        const section = reportSection(
+          reportData.heading,
+          `report-section-${index}`
+        );
+        for (const statement of reportData.statements || []) {
+          section.append(renderCitedStatement(statement, sourcesByClaim));
+        }
+        reader.append(section);
+      });
+
+      if (
+        report.limitations.length ||
+        report.contradictions.length ||
+        report.unanswered_questions.length
+      ) {
+        const caveats = reportSection(
+          "Оговорки и пробелы",
+          "report-caveats"
+        );
+        for (const value of report.limitations) {
+          const item = element("div", undefined, "cited-statement");
+          item.append(
+            element("span", "Ограничено", "evidence-badge"),
+            element("p", value)
+          );
+          caveats.append(item);
+        }
+        for (const statement of report.contradictions) {
+          caveats.append(
+            renderCitedStatement(
+              statement,
+              sourcesByClaim,
+              "contradicted"
+            )
+          );
+        }
+        for (const value of report.unanswered_questions) {
+          const item = element("div", undefined, "cited-statement");
+          item.append(
+            element(
+              "span",
+              "Не подтверждено",
+              "evidence-badge contradicted"
+            ),
+            element("p", value)
+          );
+          caveats.append(item);
+        }
+        reader.append(caveats);
+      }
+
+      if (report.sources.length) {
+        const sources = reportSection("Источники", "report-sources");
+        for (const source of report.sources) {
+          const citation = element(
+            "button",
+            `${source.citation_label} · ` +
+              `${source.source_title || source.source_url || "Источник"}`,
+            "citation-button"
+          );
+          citation.type = "button";
+          citation.addEventListener(
+            "click",
+            () => openSourceDrawer(source, citation)
+          );
+          sources.append(citation, document.createElement("br"));
+        }
+        reader.append(sources);
+      }
+
+      activeReadingRunId = run.id;
+      const saved = Number(
+        localStorage.getItem(`deep-research:reading:${run.id}`)
+      );
+      requestAnimationFrame(() => {
+        if (activeReadingRunId === run.id && Number.isFinite(saved)) {
+          window.scrollTo({top: saved, behavior: "auto"});
+        }
+      });
+      return reader;
+    }
+
     function renderDetails(run, progress) {
       detailsNode.replaceChildren();
       detailsNode.append(
@@ -1179,7 +1764,13 @@
       detailsNode.append(meta);
       const question = element("div", run.question, "details-question");
       detailsNode.append(question);
-      detailsNode.append(renderProgress(run, progress));
+      if (run.report?.result) {
+        detailsNode.append(renderReport(run));
+      } else {
+        activeReadingRunId = null;
+        document.body.classList.remove("report-focus");
+        detailsNode.append(renderProgress(run, progress));
+      }
 
       if (run.can_manage) {
         const form = element("form", undefined, "title-form");
@@ -1651,6 +2242,19 @@
     request("/api/v1/auth/session")
       .then(showWorkspace)
       .catch(showLogin);
+    window.addEventListener("scroll", () => {
+      if (activeReadingRunId) {
+        localStorage.setItem(
+          `deep-research:reading:${activeReadingRunId}`,
+          String(Math.max(0, Math.round(window.scrollY)))
+        );
+      }
+    }, {passive: true});
+    window.addEventListener("keydown", event => {
+      if (event.key === "Escape" && !sourceDrawer.hidden) {
+        closeSourceDrawer();
+      }
+    });
     window.addEventListener("unhandledrejection", event => {
       messageNode.textContent = event.reason?.message || String(event.reason);
     });

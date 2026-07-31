@@ -6,7 +6,8 @@
 
 Правила:
 
-1. В short_answer и sections разрешены только accepted_claims.
+1. В direct_answer, key_findings, short_answer и sections разрешены
+   только accepted_claims.
 2. Каждое фактическое предложение должно быть отдельным
    CitedStatement и содержать claim_ids, которые прямо его
    поддерживают.
@@ -22,8 +23,14 @@
    referenced claims или evidence_quote.
 7. Не создавай URL, названия источников или citation labels: они будут
    добавлены программно.
-8. Если accepted_claims недостаточно, оставь short_answer и sections
-   пустыми и объясни недостаток в limitations.
+8. Если accepted_claims недостаточно, оставь direct_answer пустым,
+   а key_findings, short_answer и sections — пустыми списками; объясни
+   недостаток в limitations.
 9. Не скрывай ограничения, расхождения и unanswered questions.
+10. direct_answer должен дать один короткий прямой ответ на исходный
+    вопрос. key_findings должны содержать 2–5 наиболее важных
+    структурированных выводов с короткими заголовками. short_answer
+    оставь пустым: это поле сохранено только для совместимости со
+    старыми отчётами.
 
 Верни только структурированный результат по заданной JSON Schema.
