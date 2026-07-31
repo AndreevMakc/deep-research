@@ -28,6 +28,8 @@ REQUIRED_TABLES = {
     "claims",
     "verifications",
     "research_reports",
+    "research_report_versions",
+    "claim_recheck_requests",
     "review_decisions",
     "reviewer_identities",
     "operational_events",

@@ -23,12 +23,18 @@ from sqlalchemy import func, select
 
 from app.db.models import (
     ApiRole,
+    Claim,
+    ClaimStatus,
     ResearchDraft,
     ResearchReport,
     ResearchRun,
     ReviewerIdentity,
     RunStatus,
+    Source,
+    SourceSnapshot,
     Tenant,
+    Verification,
+    VerificationVerdict,
     WorkItem,
 )
 from app.db.session import SessionFactory
@@ -442,17 +448,78 @@ class DashboardBrowserTests(unittest.TestCase):
             )
             session.add(run)
             session.flush()
+            source_record = Source(
+                run_id=run.id,
+                url="https://example.com/evidence",
+                canonical_url=(
+                    "https://example.com/evidence"
+                ),
+                title="Проверенный источник",
+                publisher="Example",
+            )
+            session.add(source_record)
+            session.flush()
+            snapshot_record = SourceSnapshot(
+                source_id=source_record.id,
+                run_id=run.id,
+                final_url=source_record.canonical_url,
+                content_hash="e" * 64,
+                mime_type="text/plain",
+                local_path="unused-in-browser-test.txt",
+                http_status=200,
+                content_length=54,
+                metadata_json={},
+            )
+            session.add(snapshot_record)
+            session.flush()
+            claim_record = Claim(
+                run_id=run.id,
+                source_snapshot_id=snapshot_record.id,
+                text=(
+                    "Подтверждён доступный частичный результат."
+                ),
+                evidence_quote=(
+                    "Точная цитата подтверждает доступный результат."
+                ),
+                quote_start=0,
+                quote_end=49,
+                locator={"section": "Результат"},
+                scope="Частичный результат",
+                status=ClaimStatus.PARTIALLY_SUPPORTED,
+                created_by_agent="researcher-v1",
+            )
+            session.add(claim_record)
+            session.flush()
+            session.add(
+                Verification(
+                    claim_id=claim_record.id,
+                    verifier_agent="verifier-v1",
+                    verdict=(
+                        VerificationVerdict
+                        .PARTIALLY_SUPPORTED
+                    ),
+                    confidence=0.82,
+                    reason=(
+                        "Цитата прямо подтверждает узкую "
+                        "часть вывода."
+                    ),
+                    checked_source_ids=[
+                        str(source_record.id)
+                    ],
+                )
+            )
+            claim_id = str(claim_record.id)
             statement = {
                 "text": "Подтверждён доступный частичный результат.",
-                "claim_ids": ["claim-1"],
+                "claim_ids": [claim_id],
                 "qualification": (
                     "Один дополнительный источник недоступен."
                 ),
             }
             source = {
                 "citation_label": "C1",
-                "claim_id": "claim-1",
-                "source_snapshot_id": "snapshot-1",
+                "claim_id": claim_id,
+                "source_snapshot_id": str(snapshot_record.id),
                 "source_url": "https://example.com/evidence",
                 "source_title": "Проверенный источник",
                 "source_publisher": "Example",
@@ -548,6 +615,16 @@ class DashboardBrowserTests(unittest.TestCase):
         )
         expect(self.page.locator("#source-drawer")).to_contain_text(
             "Цитата прямо подтверждает узкую часть вывода."
+        )
+        self.page.locator(
+            ".recheck-panel textarea"
+        ).fill("Источник мог устареть.")
+        self.page.get_by_role(
+            "button",
+            name="Проверить этот вывод",
+        ).click()
+        expect(self.page.locator(".recheck-status")).to_contain_text(
+            "Перепроверяется"
         )
         self.page.get_by_role(
             "button",

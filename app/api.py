@@ -29,10 +29,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import get_settings
+from app.agents.verifier import VERIFIER_AGENT
 from app.db.models import (
     ApiIdentity,
     ApiRole,
     Claim,
+    ClaimRecheckCategory,
+    ClaimRecheckRequest,
+    ClaimRecheckStatus,
     IdempotencyRecord,
     ResearchDraft,
     ResearchDraftMaterial,
@@ -44,6 +48,7 @@ from app.db.models import (
     Tenant,
     WorkItem,
     WorkStatus,
+    Verification,
     WebhookSubscription,
 )
 from app.db.repositories import (
@@ -73,11 +78,13 @@ from app.operations import (
     review_report,
 )
 from app.queue import (
+    enqueue_claim_recheck,
     request_run_cancellation,
     request_run_early_completion,
     request_run_pause,
     request_run_resume,
 )
+from app.rechecks import recheck_payload
 from app.research_drafts import (
     build_clarification_questions,
     interpret_research_question,
@@ -239,6 +246,15 @@ class ResetPasswordRequest(BaseModel):
 class ClaimReviewRequest(BaseModel):
     decision: Literal["approve", "reject", "research"]
     reason: str = Field(min_length=3, max_length=5_000)
+
+
+class ClaimRecheckBody(BaseModel):
+    category: ClaimRecheckCategory
+    comment: str | None = Field(
+        default=None,
+        min_length=3,
+        max_length=5_000,
+    )
 
 
 class ReportReviewRequest(BaseModel):
@@ -903,7 +919,10 @@ def _library_run_payload(
             else None
         ),
         "version_count": (
-            1 if run.report is not None else 0
+            max(
+                len(run.report_versions),
+                1 if run.report is not None else 0,
+            )
         ),
         "unread_result": (
             report_updated_at is not None
@@ -1914,6 +1933,9 @@ def list_runs(
             .options(
                 selectinload(ResearchRun.created_by),
                 selectinload(ResearchRun.report),
+                selectinload(
+                    ResearchRun.report_versions
+                ),
             )
             .where(
                 ResearchRun.tenant_id
@@ -2106,6 +2128,38 @@ def get_provenance(
     _require(identity, "view_provenance")
     run = _tenant_run(session, identity, run_id)
     report = get_research_report(session, run.id)
+    claims = get_claims_for_run(session, run.id)
+    verification_by_claim = {
+        verification.claim_id: verification
+        for verification in session.scalars(
+            select(Verification).where(
+                Verification.claim_id.in_(
+                    [claim.id for claim in claims]
+                ),
+                Verification.verifier_agent
+                == VERIFIER_AGENT,
+            )
+        ).all()
+    }
+    rechecks_by_claim: dict[uuid.UUID, list[dict]] = {}
+
+    for recheck in session.scalars(
+        select(ClaimRecheckRequest)
+        .where(
+            ClaimRecheckRequest.run_id == run.id,
+            ClaimRecheckRequest.tenant_id
+            == identity.tenant_id,
+        )
+        .order_by(
+            ClaimRecheckRequest.created_at.desc(),
+            ClaimRecheckRequest.id.desc(),
+        )
+    ).all():
+        rechecks_by_claim.setdefault(
+            recheck.claim_id,
+            [],
+        ).append(recheck_payload(recheck))
+
     work_item = session.scalar(
         select(WorkItem).where(
             WorkItem.run_id == run.id,
@@ -2137,13 +2191,70 @@ def get_provenance(
                 "review_status": (
                     claim.review_status.value
                 ),
-                "source_snapshot_id": (
-                    str(claim.source_snapshot_id)
-                    if claim.source_snapshot_id
-                    else None
+                "scope": claim.scope,
+                "evidence_quote": claim.evidence_quote,
+                "locator": claim.locator,
+                "quote_start": claim.quote_start,
+                "quote_end": claim.quote_end,
+                "source_snapshot": (
+                    None
+                    if claim.source_snapshot is None
+                    else {
+                        "id": str(
+                            claim.source_snapshot.id
+                        ),
+                        "content_hash": (
+                            claim.source_snapshot.content_hash
+                        ),
+                        "mime_type": (
+                            claim.source_snapshot.mime_type
+                        ),
+                        "final_url": (
+                            claim.source_snapshot.final_url
+                        ),
+                        "retrieved_at": (
+                            claim.source_snapshot.retrieved_at
+                        ),
+                    }
+                ),
+                "verification": (
+                    None
+                    if claim.id
+                    not in verification_by_claim
+                    else {
+                        "verdict": (
+                            verification_by_claim[
+                                claim.id
+                            ].verdict.value
+                        ),
+                        "confidence": (
+                            verification_by_claim[
+                                claim.id
+                            ].confidence
+                        ),
+                        "reason": (
+                            verification_by_claim[
+                                claim.id
+                            ].reason
+                        ),
+                        "checked_source_ids": (
+                            verification_by_claim[
+                                claim.id
+                            ].checked_source_ids
+                        ),
+                        "created_at": (
+                            verification_by_claim[
+                                claim.id
+                            ].created_at
+                        ),
+                    }
+                ),
+                "rechecks": rechecks_by_claim.get(
+                    claim.id,
+                    [],
                 ),
             }
-            for claim in get_claims_for_run(session, run.id)
+            for claim in claims
         ],
         "review_decisions": [
             {
@@ -2383,6 +2494,156 @@ def _tenant_claim(
         )
 
     return claim
+
+
+@app.get("/api/v1/claims/{claim_id}/rechecks")
+def list_claim_rechecks(
+    claim_id: uuid.UUID,
+    identity: IdentityDependency,
+    session: SessionDependency,
+) -> list[dict]:
+    _require(identity, "view")
+    claim = _tenant_claim(
+        session,
+        identity,
+        claim_id,
+    )
+    requests = session.scalars(
+        select(ClaimRecheckRequest)
+        .where(
+            ClaimRecheckRequest.claim_id == claim.id,
+            ClaimRecheckRequest.tenant_id
+            == identity.tenant_id,
+        )
+        .order_by(
+            ClaimRecheckRequest.created_at.desc(),
+            ClaimRecheckRequest.id.desc(),
+        )
+    ).all()
+    return [
+        recheck_payload(request)
+        for request in requests
+    ]
+
+
+@app.post(
+    "/api/v1/claims/{claim_id}/rechecks",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def request_claim_recheck(
+    claim_id: uuid.UUID,
+    body: ClaimRecheckBody,
+    idempotency_key: IdempotencyKey,
+    identity: IdentityDependency,
+    session: SessionDependency,
+) -> dict:
+    _require(identity, "view")
+    claim = _tenant_claim(
+        session,
+        identity,
+        claim_id,
+    )
+    run = _tenant_run(
+        session,
+        identity,
+        claim.run_id,
+    )
+
+    if (
+        run.status
+        not in {
+            RunStatus.COMPLETED,
+            RunStatus.COMPLETED_WITH_ERRORS,
+        }
+        or get_research_report(session, run.id) is None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Claim can be rechecked only after a report "
+                "is available"
+            ),
+        )
+    payload = {
+        "claim_id": str(claim.id),
+        **body.model_dump(mode="json"),
+    }
+    request_hash = _request_hash(
+        "recheck_claim",
+        payload,
+    )
+    cached = _cached_idempotency(
+        session,
+        identity=identity,
+        key=idempotency_key,
+        request_hash=request_hash,
+    )
+
+    if cached is not None:
+        return cached
+
+    verification = session.scalar(
+        select(Verification).where(
+            Verification.claim_id == claim.id,
+            Verification.verifier_agent
+            == VERIFIER_AGENT,
+        )
+    )
+    request = ClaimRecheckRequest(
+        tenant_id=identity.tenant_id,
+        run_id=claim.run_id,
+        claim_id=claim.id,
+        requested_by_identity_id=identity.id,
+        requested_by=identity.subject,
+        category=body.category,
+        comment=(
+            body.comment.strip()
+            if body.comment
+            else None
+        ),
+        status=ClaimRecheckStatus.QUEUED,
+        original_snapshot_id=claim.source_snapshot_id,
+        original_verdict=(
+            verification.verdict
+            if verification is not None
+            else None
+        ),
+    )
+    session.add(request)
+    session.flush()
+
+    try:
+        enqueue_claim_recheck(
+            session,
+            request=request,
+        )
+    except RuntimeError as error:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(error),
+        ) from error
+
+    session.flush()
+    session.refresh(request)
+    result = recheck_payload(request)
+    _store_idempotency(
+        session,
+        identity=identity,
+        key=idempotency_key,
+        request_hash=request_hash,
+        response_json=result,
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    enqueue_webhook_event(
+        session,
+        tenant_id=identity.tenant_id,
+        run_id=claim.run_id,
+        event_type="claim.recheck_requested",
+        payload=result,
+    )
+    session.commit()
+    return result
 
 
 @app.post("/api/v1/claims/{claim_id}/review")

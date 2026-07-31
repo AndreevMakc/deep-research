@@ -7,6 +7,8 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
+    ClaimRecheckRequest,
+    ClaimRecheckStatus,
     ResearchRun,
     ResearchTask,
     RunStatus,
@@ -47,6 +49,62 @@ def enqueue_run(
     session.add(item)
     session.commit()
     session.refresh(item)
+    return item
+
+
+def enqueue_claim_recheck(
+    session: Session,
+    *,
+    request: ClaimRecheckRequest,
+) -> WorkItem:
+    item = session.scalar(
+        select(WorkItem)
+        .where(
+            WorkItem.run_id == request.run_id,
+            WorkItem.kind == "recheck_claim",
+        )
+        .with_for_update()
+    )
+
+    if (
+        item is not None
+        and item.status
+        in {
+            WorkStatus.QUEUED,
+            WorkStatus.LEASED,
+            WorkStatus.PAUSED,
+        }
+    ):
+        raise RuntimeError(
+            "Another claim recheck is already active "
+            "for this research run"
+        )
+
+    if item is None:
+        item = WorkItem(
+            tenant_id=request.tenant_id,
+            run_id=request.run_id,
+            kind="recheck_claim",
+        )
+        session.add(item)
+
+    item.status = WorkStatus.QUEUED
+    item.payload = {
+        "recheck_id": str(request.id),
+        "claim_id": str(request.claim_id),
+    }
+    item.attempts = 0
+    item.max_attempts = 3
+    item.available_at = datetime.now(timezone.utc)
+    item.lease_owner = None
+    item.lease_expires_at = None
+    item.heartbeat_at = None
+    item.cancel_requested = False
+    item.pause_requested = False
+    item.finish_requested = False
+    item.last_error = None
+    request.status = ClaimRecheckStatus.QUEUED
+    session.flush()
     return item
 
 
@@ -310,7 +368,8 @@ def request_run_cancellation(
 
     item = session.scalar(
         select(WorkItem).where(
-            WorkItem.run_id == run_id
+            WorkItem.run_id == run_id,
+            WorkItem.kind == "execute_research_run",
         )
     )
 
@@ -362,6 +421,7 @@ def finish_work(
         raise RuntimeError("Worker no longer owns the lease")
 
     run = session.get(ResearchRun, item.run_id)
+    controls_run = item.kind == "execute_research_run"
 
     finalizing_early = bool(
         item.payload.get("finish_early")
@@ -370,7 +430,7 @@ def finish_work(
     if item.cancel_requested:
         item.status = WorkStatus.CANCELLED
 
-        if run is not None:
+        if controls_run and run is not None:
             run.status = RunStatus.CANCELLED
     elif succeeded:
         item.status = WorkStatus.SUCCEEDED
@@ -381,7 +441,7 @@ def finish_work(
         item.pause_requested = False
         item.attempts = max(0, item.attempts - 1)
 
-        if run is not None:
+        if controls_run and run is not None:
             run.status = RunStatus.PAUSED
     elif item.finish_requested and not finalizing_early:
         item.status = WorkStatus.QUEUED
@@ -392,7 +452,7 @@ def finish_work(
         }
         item.attempts = max(0, item.attempts - 1)
 
-        if run is not None:
+        if controls_run and run is not None:
             run.status = RunStatus.CREATED
     elif item.attempts < item.max_attempts:
         item.status = WorkStatus.QUEUED
@@ -402,15 +462,35 @@ def finish_work(
     else:
         item.status = WorkStatus.FAILED
 
-        if run is not None:
+        if controls_run and run is not None:
             run.status = RunStatus.FAILED
+
+        if item.kind == "recheck_claim":
+            recheck_id = item.payload.get("recheck_id")
+
+            if recheck_id:
+                request = session.get(
+                    ClaimRecheckRequest,
+                    uuid.UUID(recheck_id),
+                )
+
+                if request is not None:
+                    request.status = ClaimRecheckStatus.FAILED
+                    request.error = (
+                        error
+                        or "Claim recheck failed"
+                    )
+                    request.completed_at = datetime.now(
+                        timezone.utc
+                    )
 
     item.last_error = error
     item.lease_owner = None
     item.lease_expires_at = None
 
     if (
-        run is not None
+        controls_run
+        and run is not None
         and item.status
         in {
             WorkStatus.SUCCEEDED,
