@@ -33,7 +33,7 @@
       outline-offset: 2px;
     }
     [hidden] { display: none !important; }
-    .shell { width: min(1240px, calc(100% - 40px)); margin: 0 auto; }
+    .shell { width: min(1480px, calc(100% - 40px)); margin: 0 auto; }
     .topbar {
       display: flex;
       align-items: center;
@@ -311,8 +311,8 @@
     }
     .workspace-grid {
       display: grid;
-      grid-template-columns: minmax(330px, .9fr) minmax(0, 1.4fr);
-      gap: 24px;
+      grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+      gap: 20px;
       align-items: start;
       padding-bottom: 60px;
     }
@@ -457,9 +457,12 @@
     .report-toolbar-group {
       display: flex;
       align-items: center;
+      flex-wrap: wrap;
       gap: 8px;
       min-width: 0;
     }
+    .report-export-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+    .report-export-actions a { text-decoration: none; }
     .version-select { width: auto; min-width: 112px; padding: 7px 9px; }
     .version-meta { margin: -16px 0 26px; line-height: 1.5; }
     .partial-banner {
@@ -575,6 +578,7 @@
       align-items: start;
       gap: 28px;
     }
+    .mobile-report-tabs { display: none; }
     .report-dialog {
       position: sticky;
       top: 10px;
@@ -665,6 +669,10 @@
       margin: 22px auto;
     }
     body.report-focus .details { box-shadow: none; }
+    body.report-focus .report-reading-layout {
+      grid-template-columns: minmax(0, 760px);
+    }
+    body.report-focus .report-dialog { display: none; }
     @media (max-width: 1100px) {
       .report-reading-layout { grid-template-columns: minmax(0, 760px); }
       .report-dialog { position: static; }
@@ -683,10 +691,36 @@
       .draft-field.wide { grid-column: auto; }
       .progress-counters { grid-template-columns: 1fr; }
       .quality-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .details { min-height: 0; }
+      .details { min-height: 0; padding: 18px; }
+      .report-toolbar { position: static; align-items: flex-start; }
+      .report-export-actions { width: 100%; }
+      .report-export-actions > * { flex: 1 1 auto; text-align: center; }
+      .mobile-report-tabs {
+        display: flex;
+        gap: 7px;
+        margin-bottom: 18px;
+        overflow-x: auto;
+      }
+      .mobile-report-tabs .tab { flex: 1 0 auto; }
+      .mobile-report-view-hidden { display: none; }
+      .source-drawer { padding: 20px; }
     }
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { scroll-behavior: auto !important; }
+    }
+    @media print {
+      @page { margin: 16mm; }
+      body { background: #fff; }
+      body * { visibility: hidden; }
+      .report-document, .report-document * { visibility: visible; }
+      .report-document {
+        position: absolute;
+        inset: 0;
+        color: #000;
+        font-size: 11pt;
+      }
+      .report-toolbar, .report-toc, .citation-button { display: none; }
+      .direct-answer, .finding-card { break-inside: avoid; }
     }
   </style>
 </head>
@@ -999,6 +1033,9 @@
     let sourceDrawerTrigger = null;
     let sourceDrawerClaimId = null;
     let notifications = [];
+    const requestedRunId = new URLSearchParams(
+      window.location.search
+    ).get("run");
 
     const groups = [
       ["active", "Активные"],
@@ -1113,6 +1150,11 @@
       await Promise.all([loadRuns(), loadNotifications()]);
       if (identity.capabilities.create_run) {
         await loadCurrentDraft();
+      }
+      if (requestedRunId) {
+        const requested = allRuns.find(run => run.id === requestedRunId);
+        if (requested) selectedGroup = requested.group;
+        await openRun(requestedRunId);
       }
     }
 
@@ -1609,6 +1651,45 @@
       };
     }
 
+    function reportAnswerText(report) {
+      const answer = report.direct_answer;
+      if (!answer) return "Подтверждённых данных недостаточно для ответа.";
+      const sourceByClaim = new Map(
+        report.sources.map(source => [source.claim_id, source])
+      );
+      const links = [...new Set(
+        (answer.claim_ids || [])
+          .map(claimId => sourceByClaim.get(claimId)?.source_url)
+          .filter(Boolean)
+      )];
+      return [
+        answer.text,
+        answer.qualification ? `Оговорка: ${answer.qualification}` : "",
+        links.length ? "Источники:" : "",
+        ...links.map(link => `- ${link}`)
+      ].filter(Boolean).join("\n");
+    }
+
+    async function copyButtonText(button, value) {
+      const label = button.textContent;
+      try {
+        if (!navigator.clipboard?.writeText) throw new Error("no clipboard");
+        await navigator.clipboard.writeText(value);
+      } catch {
+        const input = document.createElement("textarea");
+        input.value = value;
+        input.style.position = "fixed";
+        input.style.opacity = "0";
+        document.body.append(input);
+        input.select();
+        const copied = document.execCommand("copy");
+        input.remove();
+        if (!copied) throw new Error("Не удалось скопировать текст");
+      }
+      button.textContent = "Скопировано";
+      setTimeout(() => { button.textContent = label; }, 3000);
+    }
+
     function closeSourceDrawer() {
       sourceDrawer.hidden = true;
       sourceDrawer.replaceChildren();
@@ -2002,6 +2083,57 @@
         toolbarGroup.append(versionSelect);
       }
       toolbar.append(toolbarGroup);
+      const exports = element("div", undefined, "report-export-actions");
+      const copyAnswer = element(
+        "button",
+        "Копировать ответ",
+        "quiet-button"
+      );
+      copyAnswer.type = "button";
+      copyAnswer.setAttribute("aria-label", "Копировать краткий ответ");
+      copyAnswer.addEventListener("click", async () => {
+        try {
+          await copyButtonText(copyAnswer, reportAnswerText(report));
+        } catch (error) {
+          messageNode.textContent = error.message;
+        }
+      });
+      const markdown = element("a", "Markdown", "quiet-button");
+      markdown.href =
+        `/api/v1/runs/${run.id}/export/markdown?version=${selectedVersion}`;
+      markdown.download = "";
+      markdown.setAttribute("aria-label", "Скачать отчёт в Markdown");
+      const pdf = element("button", "Сохранить PDF", "quiet-button");
+      pdf.type = "button";
+      pdf.addEventListener("click", () => window.print());
+      const share = element("button", "Скопировать ссылку", "quiet-button");
+      share.type = "button";
+      share.setAttribute("aria-label", "Скопировать внутреннюю ссылку");
+      share.addEventListener("click", async () => {
+        try {
+          await copyButtonText(
+            share,
+            new URL(`/dashboard?run=${run.id}`, window.location.origin).href
+          );
+        } catch (error) {
+          messageNode.textContent = error.message;
+        }
+      });
+      exports.append(copyAnswer, markdown, pdf, share);
+      if (currentIdentity?.capabilities?.view_provenance) {
+        const reportPackage = element(
+          "a",
+          "Пакет с источниками",
+          "quiet-button"
+        );
+        reportPackage.href = `/api/v1/runs/${run.id}/export/package`;
+        reportPackage.download = "";
+        reportPackage.setAttribute(
+          "aria-label",
+          "Скачать отчёт и snapshots источников"
+        );
+        exports.append(reportPackage);
+      }
       const focus = element(
         "button",
         document.body.classList.contains("report-focus")
@@ -2016,7 +2148,8 @@
           ? "Выйти из фокусного режима"
           : "Фокусный режим";
       });
-      toolbar.append(focus);
+      exports.append(focus);
+      toolbar.append(exports);
       reader.append(toolbar);
 
       const version = run.versions?.find(
@@ -2359,7 +2492,40 @@
         undefined,
         "report-reading-layout"
       );
-      workspace.append(renderReport(run), renderReportDialog(run));
+      const reader = renderReport(run);
+      const dialog = renderReportDialog(run);
+      reader.id = "report-reader";
+      dialog.id = "report-dialog";
+      dialog.classList.add("mobile-report-view-hidden");
+      const tabs = element("div", undefined, "mobile-report-tabs");
+      tabs.setAttribute("role", "tablist");
+      tabs.setAttribute("aria-label", "Раздел отчёта");
+      const views = [
+        ["Отчёт", "report"],
+        ["Диалог", "dialog"],
+        ["Источники", "sources"]
+      ];
+      for (const [label, view] of views) {
+        const tab = element("button", label, "tab");
+        tab.type = "button";
+        tab.setAttribute("role", "tab");
+        tab.setAttribute("aria-selected", String(view === "report"));
+        tab.addEventListener("click", () => {
+          for (const sibling of tabs.children) {
+            sibling.setAttribute("aria-selected", String(sibling === tab));
+          }
+          const showDialog = view === "dialog";
+          reader.classList.toggle("mobile-report-view-hidden", showDialog);
+          dialog.classList.toggle("mobile-report-view-hidden", !showDialog);
+          if (view === "sources") {
+            requestAnimationFrame(() => {
+              reader.querySelector("#report-sources")?.scrollIntoView();
+            });
+          }
+        });
+        tabs.append(tab);
+      }
+      workspace.append(tabs, reader, dialog);
       return workspace;
     }
 
@@ -2937,6 +3103,20 @@
     window.addEventListener("keydown", event => {
       if (event.key === "Escape" && !sourceDrawer.hidden) {
         closeSourceDrawer();
+      }
+      if (event.key === "Tab" && !sourceDrawer.hidden) {
+        const focusable = [...sourceDrawer.querySelectorAll(
+          "button, a[href], input, select, textarea"
+        )].filter(node => !node.disabled && node.getClientRects().length);
+        const first = focusable[0];
+        const last = focusable.at(-1);
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
       }
     });
     window.addEventListener("unhandledrejection", event => {

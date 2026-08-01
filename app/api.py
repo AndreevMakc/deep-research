@@ -96,6 +96,10 @@ from app.report_dialog import (
     answer_report_question,
     report_change_summary,
 )
+from app.report_exports import (
+    build_report_package,
+    render_markdown,
+)
 from app.research_drafts import (
     build_clarification_questions,
     interpret_research_question,
@@ -2208,6 +2212,81 @@ def get_report_version(
         )
 
     return selected
+
+
+@app.get("/api/v1/runs/{run_id}/export/markdown")
+def export_report_markdown(
+    run_id: uuid.UUID,
+    identity: IdentityDependency,
+    session: SessionDependency,
+    version: int | None = None,
+) -> Response:
+    _require(identity, "view")
+    run = _tenant_run(session, identity, run_id)
+    report = get_research_report(session, run.id)
+    if report is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Research report not found",
+        )
+    result = report.result_json
+    if version is not None:
+        selected = next(
+            (
+                item
+                for item in _report_versions_payload(
+                    report,
+                    run.report_versions,
+                    include_result=True,
+                )
+                if item["number"] == version
+            ),
+            None,
+        )
+        if selected is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Research report version not found",
+            )
+        result = selected["result"]
+    return Response(
+        content=render_markdown(result),
+        media_type="text/markdown",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="report-{run.id}.md"'
+            )
+        },
+    )
+
+
+@app.get("/api/v1/runs/{run_id}/export/package")
+def export_report_package(
+    run_id: uuid.UUID,
+    identity: IdentityDependency,
+    session: SessionDependency,
+) -> Response:
+    _require(identity, "view_provenance")
+    run = _tenant_run(session, identity, run_id)
+    report = get_research_report(session, run.id)
+    if report is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Research report not found",
+        )
+    return Response(
+        content=build_report_package(
+            session,
+            run_id=run.id,
+            result=report.result_json,
+        ),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="report-{run.id}-sources.zip"'
+            )
+        },
+    )
 
 
 @app.post("/api/v1/runs/{run_id}/questions")
