@@ -16,6 +16,7 @@ from app.db.models import (
     WorkItem,
     WorkStatus,
 )
+from app.notifications import notify_run_status
 
 
 def enqueue_run(
@@ -218,6 +219,7 @@ def request_run_pause(
     if item.status == WorkStatus.QUEUED:
         item.status = WorkStatus.PAUSED
         run.status = RunStatus.PAUSED
+        notify_run_status(session, run)
 
     session.flush()
     session.refresh(item)
@@ -234,6 +236,7 @@ def request_run_resume(
         session,
         tenant_id=tenant_id,
         run_id=run_id,
+        allow_retry=True,
     )
 
     if (
@@ -242,14 +245,29 @@ def request_run_resume(
     ):
         return item
 
-    if item.status != WorkStatus.PAUSED:
+    retryable_terminal = (
+        item.status == WorkStatus.FAILED
+        or (
+            item.status == WorkStatus.SUCCEEDED
+            and run.status == RunStatus.COMPLETED_WITH_ERRORS
+        )
+    )
+    if item.status != WorkStatus.PAUSED and not retryable_terminal:
         raise RuntimeError(
             f"Cannot resume work item: {item.status.value}"
         )
 
     item.pause_requested = False
+    item.finish_requested = False
     item.status = WorkStatus.QUEUED
     item.available_at = datetime.now(timezone.utc)
+    item.attempts = 0
+    item.last_error = None
+    item.payload = {
+        key: value
+        for key, value in item.payload.items()
+        if key != "finish_early"
+    }
     run.status = RunStatus.CREATED
     session.flush()
     session.refresh(item)
@@ -313,6 +331,7 @@ def _control_target(
     *,
     tenant_id: uuid.UUID,
     run_id: uuid.UUID,
+    allow_retry: bool = False,
 ) -> tuple[ResearchRun, WorkItem]:
     run = session.scalar(
         select(ResearchRun).where(
@@ -337,11 +356,22 @@ def _control_target(
             f"Work item not found for run: {run_id}"
         )
 
-    if item.status in {
-        WorkStatus.SUCCEEDED,
-        WorkStatus.FAILED,
-        WorkStatus.CANCELLED,
-    }:
+    retryable_terminal = allow_retry and (
+        item.status == WorkStatus.FAILED
+        or (
+            item.status == WorkStatus.SUCCEEDED
+            and run.status == RunStatus.COMPLETED_WITH_ERRORS
+        )
+    )
+    if (
+        item.status
+        in {
+            WorkStatus.SUCCEEDED,
+            WorkStatus.FAILED,
+            WorkStatus.CANCELLED,
+        }
+        and not retryable_terminal
+    ):
         raise RuntimeError(
             f"Cannot control terminal work item: "
             f"{item.status.value}"
@@ -443,6 +473,7 @@ def finish_work(
 
         if controls_run and run is not None:
             run.status = RunStatus.PAUSED
+            notify_run_status(session, run)
     elif item.finish_requested and not finalizing_early:
         item.status = WorkStatus.QUEUED
         item.available_at = datetime.now(timezone.utc)
@@ -515,6 +546,7 @@ def finish_work(
                 "work_status": item.status.value,
             },
         )
+        notify_run_status(session, run)
 
     session.commit()
     session.refresh(item)

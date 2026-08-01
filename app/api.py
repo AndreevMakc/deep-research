@@ -52,6 +52,7 @@ from app.db.models import (
     TaskStatus,
     WorkItem,
     WorkStatus,
+    UserNotification,
     Verification,
     WebhookSubscription,
 )
@@ -77,6 +78,7 @@ from app.multitenancy import (
     revoke_browser_session,
     reviewer_subject,
 )
+from app.notifications import notify_users
 from app.operations import (
     publish_report,
     review_claim,
@@ -1271,6 +1273,16 @@ def create_research_draft(
     )
     session.add(draft)
     session.flush()
+    if draft.requires_clarification:
+        notify_users(
+            session,
+            tenant_id=identity.tenant_id,
+            identity_ids=[identity.id],
+            draft_id=draft.id,
+            kind="clarification_required",
+            title="Нужно уточнение",
+            message="Ответьте на уточнения перед запуском исследования.",
+        )
     result = _research_draft_payload(draft)
     _store_idempotency(
         session,
@@ -2042,6 +2054,75 @@ def list_runs(
         )
         for run in runs
     ]
+
+
+@app.get("/api/v1/notifications")
+def list_notifications(
+    identity: IdentityDependency,
+    session: SessionDependency,
+) -> dict:
+    _require(identity, "view")
+    notifications = list(
+        session.scalars(
+            select(UserNotification)
+            .where(UserNotification.identity_id == identity.id)
+            .order_by(UserNotification.created_at.desc())
+            .limit(50)
+        ).all()
+    )
+    return {
+        "unread_count": session.scalar(
+            select(func.count(UserNotification.id)).where(
+                UserNotification.identity_id == identity.id,
+                UserNotification.read_at.is_(None),
+            )
+        ) or 0,
+        "items": [
+            {
+                "id": str(notification.id),
+                "kind": notification.kind,
+                "title": notification.title,
+                "message": notification.message,
+                "run_id": (
+                    str(notification.run_id)
+                    if notification.run_id is not None
+                    else None
+                ),
+                "draft_id": (
+                    str(notification.draft_id)
+                    if notification.draft_id is not None
+                    else None
+                ),
+                "read": notification.read_at is not None,
+                "created_at": notification.created_at,
+            }
+            for notification in notifications
+        ],
+    }
+
+
+@app.post("/api/v1/notifications/{notification_id}/read")
+def mark_notification_read(
+    notification_id: uuid.UUID,
+    identity: IdentityDependency,
+    session: SessionDependency,
+) -> dict:
+    _require(identity, "view")
+    notification = session.scalar(
+        select(UserNotification).where(
+            UserNotification.id == notification_id,
+            UserNotification.identity_id == identity.id,
+        )
+    )
+    if notification is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Notification not found",
+        )
+    if notification.read_at is None:
+        notification.read_at = datetime.now(timezone.utc)
+        session.commit()
+    return {"id": str(notification.id), "read": True}
 
 
 @app.get("/api/v1/runs/{run_id}")

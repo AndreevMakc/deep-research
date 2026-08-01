@@ -188,6 +188,34 @@ def build_run_progress(
             WorkStatus.PAUSED,
         }
     )
+    partial_results = [
+        {
+            "title": task.input_data.get("title") or task.question,
+            "summary": task.output_data["summary"],
+        }
+        for task in run.tasks
+        if (
+            task.status == TaskStatus.COMPLETED
+            and task.output_data.get("summary")
+        )
+    ]
+    unavailable_sources = sum(
+        len(task.output_data.get("source_fetch_failures", []))
+        for task in run.tasks
+    )
+    limitations = []
+    if directions_failed:
+        limitations.append(
+            f"Не завершено направлений: {directions_failed}."
+        )
+    if unavailable_sources:
+        limitations.append(
+            f"Не удалось загрузить источников: {unavailable_sources}."
+        )
+    if run.external_requests_used >= run.max_external_requests:
+        limitations.append("Достигнут лимит внешних запросов.")
+    if run.tokens_used >= run.max_tokens:
+        limitations.append("Достигнут лимит токенов.")
     result = {
         "run_id": str(run.id),
         "status": run.status.value,
@@ -221,7 +249,15 @@ def build_run_progress(
             ),
             "can_resume": bool(
                 item
-                and item.status == WorkStatus.PAUSED
+                and (
+                    item.status == WorkStatus.PAUSED
+                    or item.status == WorkStatus.FAILED
+                    or (
+                        item.status == WorkStatus.SUCCEEDED
+                        and run.status
+                        == RunStatus.COMPLETED_WITH_ERRORS
+                    )
+                )
             ),
             "can_finish": bool(
                 work_active
@@ -230,6 +266,8 @@ def build_run_progress(
                 and not item.cancel_requested
             ),
         },
+        "partial_results": partial_results,
+        "limitations": limitations,
     }
 
     if include_technical:

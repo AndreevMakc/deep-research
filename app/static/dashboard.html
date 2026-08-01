@@ -58,6 +58,48 @@
       text-transform: uppercase;
     }
     .identity { text-align: right; color: var(--muted); font-size: .88rem; }
+    .notification-center { position: relative; }
+    .notification-button { position: relative; }
+    .notification-badge {
+      position: absolute;
+      top: -7px;
+      right: -7px;
+      min-width: 20px;
+      border-radius: 999px;
+      background: var(--red);
+      color: #fff;
+      padding: 2px 6px;
+      font-size: .7rem;
+      text-align: center;
+    }
+    .notification-panel {
+      position: absolute;
+      z-index: 20;
+      top: calc(100% + 10px);
+      right: 0;
+      width: min(390px, calc(100vw - 32px));
+      max-height: 440px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      padding: 8px;
+    }
+    .notification-panel h2 { margin: 10px 12px; font-size: 1rem; }
+    .notification-item {
+      display: grid;
+      width: 100%;
+      gap: 4px;
+      border: 0;
+      border-top: 1px solid var(--line);
+      background: transparent;
+      color: var(--ink);
+      padding: 12px;
+      text-align: left;
+    }
+    .notification-item.unread { background: var(--green-soft); }
+    .notification-item span { color: var(--muted); font-size: .82rem; }
     .quiet-button, .secondary-button, .tab {
       border: 1px solid var(--line);
       border-radius: 999px;
@@ -676,6 +718,18 @@
         <h1>Исследования</h1>
       </div>
       <div id="identity" class="identity"></div>
+      <div class="notification-center">
+        <button id="notifications-toggle" class="quiet-button notification-button"
+          type="button" aria-expanded="false" aria-controls="notifications-panel">
+          Уведомления
+          <span id="notifications-badge" class="notification-badge" hidden></span>
+        </button>
+        <section id="notifications-panel" class="notification-panel"
+          aria-label="Уведомления" hidden>
+          <h2>Уведомления</h2>
+          <div id="notifications-list"></div>
+        </section>
+      </div>
       <button id="logout" class="quiet-button" type="button">Выйти</button>
     </header>
 
@@ -898,6 +952,14 @@
     const tabsNode = document.querySelector("#tabs");
     const detailsNode = document.querySelector("#details");
     const sourceDrawer = document.querySelector("#source-drawer");
+    const notificationsToggle =
+      document.querySelector("#notifications-toggle");
+    const notificationsPanel =
+      document.querySelector("#notifications-panel");
+    const notificationsBadge =
+      document.querySelector("#notifications-badge");
+    const notificationsList =
+      document.querySelector("#notifications-list");
     const questionNode = document.querySelector("#question");
     const researchForm = document.querySelector("#research-form");
     const examplesNode = document.querySelector(".examples");
@@ -936,6 +998,7 @@
     let activeReadingRunId = null;
     let sourceDrawerTrigger = null;
     let sourceDrawerClaimId = null;
+    let notifications = [];
 
     const groups = [
       ["active", "Активные"],
@@ -1047,7 +1110,7 @@
       composer.hidden = !identity.capabilities.create_run;
       document.querySelector("#identity").textContent =
         `${identity.login} · ${identity.role}`;
-      await loadRuns();
+      await Promise.all([loadRuns(), loadNotifications()]);
       if (identity.capabilities.create_run) {
         await loadCurrentDraft();
       }
@@ -1225,6 +1288,58 @@
       renderLibrary();
     }
 
+    async function loadNotifications() {
+      const data = await request("/api/v1/notifications");
+      notifications = data.items;
+      notificationsBadge.hidden = data.unread_count === 0;
+      notificationsBadge.textContent = String(data.unread_count);
+      renderNotifications();
+    }
+
+    function renderNotifications() {
+      notificationsList.replaceChildren();
+      if (!notifications.length) {
+        notificationsList.append(
+          element("p", "Новых событий пока нет.", "muted small")
+        );
+        return;
+      }
+      for (const notification of notifications) {
+        const item = element(
+          "button",
+          undefined,
+          `notification-item${notification.read ? "" : " unread"}`
+        );
+        item.type = "button";
+        item.append(
+          element("strong", notification.title),
+          element("span", notification.message),
+          element("span", formatDate(notification.created_at))
+        );
+        item.addEventListener("click", async () => {
+          if (!notification.read) {
+            await request(
+              `/api/v1/notifications/${notification.id}/read`,
+              {method: "POST"}
+            );
+            notification.read = true;
+            await loadNotifications();
+          }
+          notificationsPanel.hidden = true;
+          notificationsToggle.setAttribute("aria-expanded", "false");
+          if (notification.run_id) {
+            const run = allRuns.find(entry => entry.id === notification.run_id);
+            if (run) selectedGroup = run.group;
+            await openRun(notification.run_id);
+          } else if (notification.draft_id) {
+            await loadCurrentDraft();
+            composer.scrollIntoView({behavior: "smooth"});
+          }
+        });
+        notificationsList.append(item);
+      }
+    }
+
     function renderLibrary() {
       tabsNode.replaceChildren();
       runsNode.replaceChildren();
@@ -1337,14 +1452,39 @@
       }
       card.append(counters);
 
+      if (progress.partial_results.length) {
+        const partial = element("section");
+        partial.append(element("h3", "Сохранённые частичные результаты"));
+        for (const result of progress.partial_results) {
+          partial.append(
+            element("h4", result.title),
+            element("p", result.summary, "small")
+          );
+        }
+        card.append(partial);
+      }
+      if (progress.limitations.length) {
+        const limitations = element("section");
+        limitations.append(element("h3", "Почему результат неполный"));
+        const list = element("ul", undefined, "small");
+        for (const limitation of progress.limitations) {
+          list.append(element("li", limitation));
+        }
+        limitations.append(list);
+        card.append(limitations);
+      }
+
       if (
         run.can_manage &&
         currentIdentity.capabilities.control_run
       ) {
         const actions = element("div", undefined, "detail-actions");
+        const retryLabel = ["failed", "completed_with_errors"].includes(
+          run.status
+        ) ? "Повторить незавершённые этапы" : "Продолжить";
         const controls = [
           ["can_pause", "Поставить на паузу", "pause"],
-          ["can_resume", "Продолжить", "resume"],
+          ["can_resume", retryLabel, "resume"],
           ["can_finish", "Завершить на собранном", "finish"]
         ];
         for (const [flag, label, action] of controls) {
@@ -2238,6 +2378,9 @@
       const question = element("div", run.question, "details-question");
       detailsNode.append(question);
       if (run.report?.result) {
+        if (run.report.partial) {
+          detailsNode.append(renderProgress(run, progress));
+        }
         detailsNode.append(renderReportWorkspace(run));
       } else {
         activeReadingRunId = null;
@@ -2434,6 +2577,7 @@
           }
         );
         renderDraft(draft);
+        await loadNotifications();
       } catch (error) {
         messageNode.textContent = error.message;
       } finally {
@@ -2751,6 +2895,14 @@
       }
     });
 
+    notificationsToggle.addEventListener("click", () => {
+      notificationsPanel.hidden = !notificationsPanel.hidden;
+      notificationsToggle.setAttribute(
+        "aria-expanded",
+        String(!notificationsPanel.hidden)
+      );
+    });
+
     let refreshing = false;
     setInterval(async () => {
       if (
@@ -2761,7 +2913,7 @@
       ) {
         refreshing = true;
         try {
-          await loadRuns();
+          await Promise.all([loadRuns(), loadNotifications()]);
           if (selectedRunId) await openRun(selectedRunId);
         } catch (error) {
           messageNode.textContent = error.message;

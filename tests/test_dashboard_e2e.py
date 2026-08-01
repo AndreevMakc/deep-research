@@ -757,6 +757,9 @@ class DashboardBrowserTests(unittest.TestCase):
             self.page.locator("#clarification-card")
         ).to_be_visible()
         expect(
+            self.page.locator("#notifications-badge")
+        ).to_have_text("1")
+        expect(
             self.page.locator("#clarification-progress")
         ).to_have_text("Шаг 1 из 3")
 
@@ -774,6 +777,9 @@ class DashboardBrowserTests(unittest.TestCase):
         expect(
             self.page.locator("#clarification-progress")
         ).to_have_text("Шаг 2 из 3")
+        expect(
+            self.page.locator("#notifications-badge")
+        ).to_have_text("1")
 
         self.page.reload(wait_until="domcontentloaded")
         expect(
