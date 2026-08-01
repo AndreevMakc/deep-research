@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import socket
 import subprocess
 import sys
 import time
+import tempfile
 import unittest
 import urllib.request
 import uuid
+import zipfile
 from pathlib import Path
 
 from playwright.sync_api import (
@@ -171,6 +174,10 @@ class DashboardBrowserTests(unittest.TestCase):
         self.context: BrowserContext = (
             self.browser.new_context()
         )
+        self.context.grant_permissions(
+            ["clipboard-read", "clipboard-write"],
+            origin=self.base_url,
+        )
         self.page: Page = self.context.new_page()
         self.page.set_default_timeout(10_000)
 
@@ -217,6 +224,7 @@ class DashboardBrowserTests(unittest.TestCase):
     def test_login_empty_library_draft_refresh_and_run(
         self,
     ) -> None:
+        self.page.set_viewport_size({"width": 390, "height": 844})
         question = (
             "Какие факторы влияют на выбор платформы "
             "для российских B2B-команд за 2025 год "
@@ -438,6 +446,12 @@ class DashboardBrowserTests(unittest.TestCase):
     def test_reads_partial_editorial_report_and_citation(
         self,
     ) -> None:
+        source_content = "Точная цитата подтверждает доступный результат."
+        source_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(source_directory.cleanup)
+        source_path = Path(source_directory.name) / "source.txt"
+        source_path.write_text(source_content, encoding="utf-8")
+        source_hash = hashlib.sha256(source_content.encode()).hexdigest()
         with SessionFactory() as session:
             run = ResearchRun(
                 tenant_id=self.tenant_id,
@@ -463,11 +477,11 @@ class DashboardBrowserTests(unittest.TestCase):
                 source_id=source_record.id,
                 run_id=run.id,
                 final_url=source_record.canonical_url,
-                content_hash="e" * 64,
+                content_hash=source_hash,
                 mime_type="text/plain",
-                local_path="unused-in-browser-test.txt",
+                local_path=str(source_path),
                 http_status=200,
-                content_length=54,
+                content_length=len(source_content.encode()),
                 metadata_json={},
             )
             session.add(snapshot_record)
@@ -602,6 +616,85 @@ class DashboardBrowserTests(unittest.TestCase):
         )
         expect(self.page.locator(".evidence-badge").first).to_have_text(
             "Ограничено"
+        )
+
+        copy_answer = self.page.get_by_role(
+            "button",
+            name="Копировать краткий ответ",
+        )
+        copy_answer.click()
+        expect(copy_answer).to_have_text("Скопировано")
+        copied_answer = self.page.evaluate(
+            "navigator.clipboard.readText()"
+        )
+        self.assertIn(
+            "Подтверждён доступный частичный результат.",
+            copied_answer,
+        )
+        self.assertIn("https://example.com/evidence", copied_answer)
+
+        with self.page.expect_download() as markdown_download:
+            self.page.get_by_role(
+                "link",
+                name="Скачать отчёт в Markdown",
+            ).click()
+        self.assertIn(
+            "Подтверждён доступный частичный результат.",
+            Path(markdown_download.value.path()).read_text(),
+        )
+        with self.page.expect_download() as package_download:
+            self.page.get_by_role(
+                "link",
+                name="Скачать отчёт и snapshots источников",
+            ).click()
+        self.assertTrue(zipfile.is_zipfile(package_download.value.path()))
+
+        self.page.evaluate(
+            "window.__printed = false; "
+            "window.print = () => { window.__printed = true; }"
+        )
+        self.page.get_by_role(
+            "button",
+            name="Сохранить PDF",
+        ).click()
+        self.assertTrue(self.page.evaluate("window.__printed"))
+
+        share = self.page.get_by_role(
+            "button",
+            name="Скопировать внутреннюю ссылку",
+        )
+        share.click()
+        expect(share).to_have_text("Скопировано")
+        shared_url = self.page.evaluate("navigator.clipboard.readText()")
+        self.assertIn(f"/dashboard?run={run_id}", shared_url)
+
+        focus = self.page.get_by_role(
+            "button",
+            name="Фокусный режим",
+        )
+        focus.click()
+        expect(self.page.locator("#library-panel")).to_be_hidden()
+        expect(self.page.locator("#report-dialog")).to_be_hidden()
+        self.page.get_by_role(
+            "button",
+            name="Выйти из фокусного режима",
+        ).click()
+
+        self.page.set_viewport_size({"width": 390, "height": 844})
+        mobile_tabs = self.page.get_by_role(
+            "tablist",
+            name="Раздел отчёта",
+        )
+        expect(mobile_tabs).to_be_visible()
+        self.page.get_by_role("tab", name="Диалог").click()
+        expect(self.page.locator("#report-reader")).to_be_hidden()
+        expect(self.page.locator("#report-dialog")).to_be_visible()
+        self.page.get_by_role("tab", name="Источники").click()
+        expect(self.page.locator("#report-reader")).to_be_visible()
+
+        self.page.goto(shared_url, wait_until="domcontentloaded")
+        expect(self.page.locator("#report-answer")).to_contain_text(
+            "Подтверждён доступный частичный результат."
         )
 
         citation = self.page.get_by_role(
