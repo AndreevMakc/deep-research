@@ -641,6 +641,60 @@ class ResearchRunView(Base):
     )
 
 
+class UserNotification(Base):
+    __tablename__ = "user_notifications"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    identity_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("api_identities.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("research_runs.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    draft_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("research_drafts.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    kind: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        index=True,
+    )
+    title: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+    message: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+    read_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        index=True,
+    )
+
+
 class ResearchTask(Base):
     __tablename__ = "research_tasks"
 

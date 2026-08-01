@@ -97,6 +97,7 @@ def main() -> None:
         assert "research_draft_materials" in tables
         assert "claim_recheck_requests" in tables
         assert "research_report_versions" in tables
+        assert "user_notifications" in tables
         assert "work_items" in tables
         assert "idempotency_records" in tables
         assert "webhook_subscriptions" in tables
@@ -324,6 +325,7 @@ def main() -> None:
                 "research_drafts",
                 "claim_recheck_requests",
                 "research_report_versions",
+                "user_notifications",
                 "work_items",
                 "idempotency_records",
                 "webhook_subscriptions",
