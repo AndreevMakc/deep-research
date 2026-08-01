@@ -412,6 +412,14 @@
       backdrop-filter: blur(12px);
     }
     .report-toolbar .muted { margin: 0; }
+    .report-toolbar-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+    .version-select { width: auto; min-width: 112px; padding: 7px 9px; }
+    .version-meta { margin: -16px 0 26px; line-height: 1.5; }
     .partial-banner {
       margin: 0 0 24px;
       padding: 14px 16px;
@@ -422,7 +430,7 @@
       line-height: 1.5;
     }
     .report-document {
-      width: min(760px, 100%);
+      width: 100%;
       margin: 0 auto;
       font-family: Georgia, "Times New Roman", serif;
       font-size: 1.04rem;
@@ -518,6 +526,34 @@
     }
     .evidence-badge.contradicted { background: #f6e7e4; color: var(--red); }
     .report-notes { padding-left: 21px; }
+    .report-reading-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 760px) minmax(260px, 320px);
+      justify-content: center;
+      align-items: start;
+      gap: 28px;
+    }
+    .report-dialog {
+      position: sticky;
+      top: 10px;
+      display: grid;
+      gap: 14px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: #f8faf6;
+    }
+    .report-dialog h3 { margin: 0; font-size: 1.05rem; }
+    .report-dialog form { display: grid; gap: 10px; }
+    .dialog-answer, .follow-up-card {
+      display: grid;
+      gap: 10px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+      line-height: 1.55;
+    }
+    .dialog-answer p, .follow-up-card p { margin: 0; }
+    .dialog-actions { display: flex; flex-wrap: wrap; gap: 8px; }
     .source-drawer {
       position: fixed;
       z-index: 20;
@@ -583,10 +619,14 @@
     body.report-focus #library-panel { display: none; }
     body.report-focus .workspace-grid {
       display: block;
-      width: min(980px, 100%);
+      width: min(1180px, 100%);
       margin: 22px auto;
     }
     body.report-focus .details { box-shadow: none; }
+    @media (max-width: 1100px) {
+      .report-reading-layout { grid-template-columns: minmax(0, 760px); }
+      .report-dialog { position: static; }
+    }
     .muted { color: var(--muted); }
     .small { font-size: .82rem; }
     .error { color: var(--red); white-space: pre-wrap; }
@@ -1768,15 +1808,60 @@
       reader.setAttribute("aria-label", "Отчёт исследования");
 
       const toolbar = element("div", undefined, "report-toolbar");
-      toolbar.append(
-        element(
+      const toolbarGroup = element(
+        "div",
+        undefined,
+        "report-toolbar-group"
+      );
+      toolbarGroup.append(element(
           "p",
           run.report.partial
             ? "Доступен частичный результат"
             : "Единый отчёт",
           "muted small"
-        )
+      ));
+      const selectedVersion = Number(
+        run.selected_version ||
+        run.versions?.find(version => version.current)?.number ||
+        1
       );
+      if (run.versions?.length) {
+        const versionSelect = element(
+          "select",
+          undefined,
+          "version-select"
+        );
+        versionSelect.setAttribute("aria-label", "Версия отчёта");
+        for (const version of run.versions) {
+          const option = element("option", `Версия ${version.number}`);
+          option.value = version.number;
+          option.selected = version.number === selectedVersion;
+          versionSelect.append(option);
+        }
+        versionSelect.addEventListener("change", async () => {
+          try {
+            const version = await request(
+              `/api/v1/runs/${run.id}/versions/${versionSelect.value}`
+            );
+            const nextRun = {
+              ...run,
+              selected_version: version.number,
+              report: {
+                ...run.report,
+                result: version.result,
+                updated_at: version.created_at
+              }
+            };
+            reader.closest(".report-reading-layout")?.replaceWith(
+              renderReportWorkspace(nextRun)
+            );
+          } catch (error) {
+            messageNode.textContent = error.message;
+          }
+        });
+        toolbarGroup.append(versionSelect);
+      }
+      toolbar.append(toolbarGroup);
       const focus = element(
         "button",
         document.body.classList.contains("report-focus")
@@ -1793,6 +1878,21 @@
       });
       toolbar.append(focus);
       reader.append(toolbar);
+
+      const version = run.versions?.find(
+        item => item.number === selectedVersion
+      );
+      if (version) {
+        reader.append(
+          element(
+            "p",
+            `Версия ${version.number} · ${version.reason} · ` +
+              `${version.requested_by || "система"} · ` +
+              version.change_summary,
+            "muted small version-meta"
+          )
+        );
+      }
 
       if (run.report.partial) {
         reader.append(
@@ -1967,6 +2067,162 @@
       return reader;
     }
 
+    function renderReportDialog(run) {
+      const panel = element("aside", undefined, "report-dialog");
+      panel.setAttribute("aria-label", "Вопросы по отчёту");
+      panel.append(
+        element("h3", "Вопрос по отчёту"),
+        element(
+          "p",
+          "Ответ ограничен текущим отчётом и его сохранёнными источниками.",
+          "muted small"
+        )
+      );
+      const selectedVersion = Number(
+        run.selected_version ||
+        run.versions?.find(version => version.current)?.number ||
+        1
+      );
+      const selected = run.versions?.find(
+        version => version.number === selectedVersion
+      );
+      if (selected && !selected.current) {
+        panel.append(
+          element(
+            "p",
+            "Вопросы доступны только для текущей версии отчёта.",
+            "muted small"
+          )
+        );
+        return panel;
+      }
+
+      const form = element("form");
+      const label = element("label", "Что уточнить");
+      const input = element("textarea");
+      input.minLength = 3;
+      input.maxLength = 5000;
+      input.required = true;
+      input.placeholder = "Например: какие источники подтверждают вывод?";
+      label.append(input);
+      const submit = element("button", "Ответить по отчёту", "primary-button");
+      submit.type = "submit";
+      const response = element("div");
+      form.append(label, submit);
+      panel.append(form, response);
+
+      form.addEventListener("submit", async event => {
+        event.preventDefault();
+        const question = input.value.trim();
+        submit.disabled = true;
+        submit.textContent = "Ищем в отчёте…";
+        response.replaceChildren();
+        try {
+          const answer = await request(
+            `/api/v1/runs/${run.id}/questions`,
+            {
+              method: "POST",
+              body: JSON.stringify({question})
+            }
+          );
+          const answerNode = element("div", undefined, "dialog-answer");
+          if (answer.answer) answerNode.append(element("p", answer.answer));
+          for (const section of answer.sections || []) {
+            const link = element("a", section.title);
+            link.href = `#${section.id}`;
+            answerNode.append(link);
+          }
+          for (const source of answer.citations || []) {
+            const citation = element(
+              "button",
+              source.citation_label || source.source_title || "Источник",
+              "citation-button"
+            );
+            citation.type = "button";
+            citation.addEventListener(
+              "click",
+              () => openSourceDrawer(source, citation)
+            );
+            answerNode.append(citation);
+          }
+          response.append(answerNode);
+
+          if (answer.needs_research) {
+            const card = element("div", undefined, "follow-up-card");
+            card.append(
+              element("strong", "В отчёте недостаточно данных"),
+              element(
+                "p",
+                answer.missing_information ||
+                  "Для ответа нужен дополнительный поиск.",
+                "muted small"
+              )
+            );
+            const actions = element("div", undefined, "dialog-actions");
+            const decline = element(
+              "button",
+              "Остаться в отчёте",
+              "quiet-button"
+            );
+            decline.type = "button";
+            decline.addEventListener("click", () => card.remove());
+            actions.append(decline);
+
+            if (currentIdentity?.capabilities?.create_run) {
+              const confirm = element(
+                "button",
+                "Запустить дополнительный поиск",
+                "primary-button"
+              );
+              confirm.type = "button";
+              confirm.addEventListener("click", async () => {
+                confirm.disabled = true;
+                confirm.textContent = "Ставим в очередь…";
+                try {
+                  await request(
+                    `/api/v1/runs/${run.id}/follow-ups`,
+                    {
+                      method: "POST",
+                      idempotent: true,
+                      body: JSON.stringify({
+                        question,
+                        reason: answer.missing_information || question
+                      })
+                    }
+                  );
+                  await loadRuns();
+                  await openRun(run.id);
+                } catch (error) {
+                  card.append(element("p", error.message, "error small"));
+                  confirm.disabled = false;
+                  confirm.textContent = "Запустить дополнительный поиск";
+                }
+              });
+              actions.append(confirm);
+            }
+            card.append(actions);
+            response.append(card);
+          }
+        } catch (error) {
+          response.append(element("p", error.message, "error small"));
+        } finally {
+          submit.disabled = false;
+          submit.textContent = "Ответить по отчёту";
+        }
+      });
+      return panel;
+    }
+
+    function renderReportWorkspace(run) {
+      const workspace = element(
+        "div",
+        undefined,
+        "report-reading-layout"
+      );
+      workspace.append(renderReport(run), renderReportDialog(run));
+      return workspace;
+    }
+
     function renderDetails(run, progress) {
       detailsNode.replaceChildren();
       detailsNode.append(
@@ -1982,7 +2238,7 @@
       const question = element("div", run.question, "details-question");
       detailsNode.append(question);
       if (run.report?.result) {
-        detailsNode.append(renderReport(run));
+        detailsNode.append(renderReportWorkspace(run));
       } else {
         activeReadingRunId = null;
         document.body.classList.remove("report-focus");

@@ -15,6 +15,7 @@ from app.db.models import (
     ReviewDecisionType,
     ReviewTargetType,
     ResearchReport,
+    ResearchReportVersion,
     ResearchRun,
     ResearchTask,
     RunStatus,
@@ -459,6 +460,52 @@ def get_research_report(
             ResearchReport.run_id == run_id
         )
     )
+
+
+def snapshot_research_report_version(
+    session: Session,
+    *,
+    report: ResearchReport,
+    reason: str,
+    requested_by: str | None,
+    claim_recheck_id: uuid.UUID | None = None,
+    force: bool = False,
+) -> ResearchReportVersion:
+    latest = session.scalar(
+        select(ResearchReportVersion)
+        .where(
+            ResearchReportVersion.run_id == report.run_id
+        )
+        .order_by(
+            ResearchReportVersion.version_number.desc()
+        )
+        .limit(1)
+    )
+
+    if (
+        not force
+        and latest is not None
+        and latest.json_hash == report.json_hash
+    ):
+        return latest
+
+    version = ResearchReportVersion(
+        run_id=report.run_id,
+        claim_recheck_id=claim_recheck_id,
+        version_number=(
+            latest.version_number + 1
+            if latest is not None
+            else 1
+        ),
+        reason=reason,
+        requested_by=requested_by,
+        markdown_hash=report.markdown_hash,
+        json_hash=report.json_hash,
+        result_json=report.result_json,
+    )
+    session.add(version)
+    session.flush()
+    return version
 
 
 def get_review_decisions_for_run(
