@@ -41,11 +41,15 @@ from app.db.models import (
     ResearchDraft,
     ResearchDraftMaterial,
     ResearchDraftStatus,
+    ResearchReport,
+    ResearchReportVersion,
     ResearchRun,
     ResearchRunView,
+    ResearchTask,
     ReviewDecisionType,
     RunStatus,
     Tenant,
+    TaskStatus,
     WorkItem,
     WorkStatus,
     Verification,
@@ -56,6 +60,7 @@ from app.db.repositories import (
     get_research_report,
     get_review_decisions_for_run,
     get_tasks_for_run,
+    snapshot_research_report_version,
 )
 from app.db.session import SessionFactory
 from app.health import readiness
@@ -85,6 +90,10 @@ from app.queue import (
     request_run_resume,
 )
 from app.rechecks import recheck_payload
+from app.report_dialog import (
+    answer_report_question,
+    report_change_summary,
+)
 from app.research_drafts import (
     build_clarification_questions,
     interpret_research_question,
@@ -225,6 +234,15 @@ class UpdateRunRequest(BaseModel):
         max_length=160,
     )
     archived: bool | None = None
+
+
+class ReportQuestionRequest(BaseModel):
+    question: str = Field(min_length=3, max_length=5_000)
+
+
+class ReportFollowUpRequest(BaseModel):
+    question: str = Field(min_length=3, max_length=5_000)
+    reason: str = Field(min_length=3, max_length=5_000)
 
 
 class LoginRequest(BaseModel):
@@ -936,6 +954,60 @@ def _library_run_payload(
         "archived_at": run.archived_at,
         "can_manage": can_manage,
     }
+
+
+def _report_versions_payload(
+    report: ResearchReport,
+    versions: list[ResearchReportVersion],
+    *,
+    include_result: bool = False,
+) -> list[dict]:
+    ordered = sorted(
+        versions,
+        key=lambda version: version.version_number,
+    )
+    entries = [
+        {
+            "number": version.version_number,
+            "reason": version.reason,
+            "requested_by": version.requested_by,
+            "created_at": version.created_at,
+            "json_hash": version.json_hash,
+            "result": version.result_json,
+        }
+        for version in ordered
+    ]
+    if not entries or entries[-1]["json_hash"] != report.json_hash:
+        entries.append(
+            {
+                "number": (
+                    entries[-1]["number"] + 1
+                    if entries
+                    else 1
+                ),
+                "reason": "Текущая версия отчёта",
+                "requested_by": None,
+                "created_at": report.updated_at,
+                "json_hash": report.json_hash,
+                "result": report.result_json,
+            }
+        )
+
+    for index, entry in enumerate(entries):
+        entry["current"] = index == len(entries) - 1
+        entry["change_summary"] = (
+            "Исходная версия отчёта."
+            if index == 0
+            else report_change_summary(
+                entries[index - 1]["result"],
+                entry["result"],
+            )
+        )
+    for entry in entries:
+        entry.pop("json_hash")
+        if not include_result:
+            entry.pop("result")
+    return entries
 
 
 def _require_library_owner(
@@ -2006,7 +2078,230 @@ def get_run(
             "result": report.result_json,
         }
     )
+    payload["versions"] = (
+        []
+        if report is None
+        else _report_versions_payload(
+            report,
+            run.report_versions,
+        )
+    )
     return payload
+
+
+@app.get("/api/v1/runs/{run_id}/versions/{version_number}")
+def get_report_version(
+    run_id: uuid.UUID,
+    version_number: int,
+    identity: IdentityDependency,
+    session: SessionDependency,
+) -> dict:
+    _require(identity, "view")
+    run = _tenant_run(session, identity, run_id)
+    report = get_research_report(session, run.id)
+
+    if report is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Research report not found",
+        )
+
+    versions = _report_versions_payload(
+        report,
+        run.report_versions,
+        include_result=True,
+    )
+    selected = next(
+        (
+            version
+            for version in versions
+            if version["number"] == version_number
+        ),
+        None,
+    )
+
+    if selected is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Research report version not found",
+        )
+
+    return selected
+
+
+@app.post("/api/v1/runs/{run_id}/questions")
+def ask_report_question(
+    run_id: uuid.UUID,
+    body: ReportQuestionRequest,
+    identity: IdentityDependency,
+    session: SessionDependency,
+) -> dict:
+    _require(identity, "view")
+    run = _tenant_run(session, identity, run_id)
+    report = get_research_report(session, run.id)
+
+    if report is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Research report is not ready",
+        )
+
+    return answer_report_question(
+        run_id=run.id,
+        question=body.question,
+        result=report.result_json,
+    )
+
+
+@app.post(
+    "/api/v1/runs/{run_id}/follow-ups",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def request_report_follow_up(
+    run_id: uuid.UUID,
+    body: ReportFollowUpRequest,
+    idempotency_key: IdempotencyKey,
+    identity: IdentityDependency,
+    session: SessionDependency,
+):
+    _require(identity, "create_run")
+    payload = body.model_dump(mode="json")
+    request_hash = _request_hash(
+        "report_follow_up",
+        payload,
+    )
+    cached = _cached_idempotency(
+        session,
+        identity=identity,
+        key=idempotency_key,
+        request_hash=request_hash,
+    )
+
+    if cached is not None:
+        return cached
+
+    run = session.scalar(
+        select(ResearchRun)
+        .where(
+            ResearchRun.id == run_id,
+            ResearchRun.tenant_id
+            == identity.tenant_id,
+        )
+        .with_for_update()
+    )
+
+    if run is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Research run not found",
+        )
+
+    report = get_research_report(session, run.id)
+
+    if report is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Research report is not ready",
+        )
+
+    work_item = session.scalar(
+        select(WorkItem)
+        .where(
+            WorkItem.run_id == run.id,
+            WorkItem.kind == "execute_research_run",
+        )
+        .with_for_update()
+    )
+
+    if work_item is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Research work item is unavailable",
+        )
+
+    if work_item.status in {
+        WorkStatus.QUEUED,
+        WorkStatus.LEASED,
+        WorkStatus.PAUSED,
+    }:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Research run already has active work",
+        )
+
+    snapshot_research_report_version(
+        session,
+        report=report,
+        reason="Исходная версия отчёта",
+        requested_by=None,
+    )
+    task = ResearchTask(
+        run_id=run.id,
+        task_type="report_follow_up_research",
+        question=body.question.strip(),
+        status=TaskStatus.PENDING,
+        priority=0,
+        assigned_agent=None,
+        input_data={
+            "title": "Дополнительное исследование",
+            "objective": body.reason.strip(),
+            "source_types": [],
+            "search_queries": [body.question.strip()],
+            "follow_up_reason": body.question.strip(),
+            "requested_by": identity.subject,
+        },
+        output_data={},
+    )
+    session.add(task)
+    session.flush()
+    work_item.status = WorkStatus.QUEUED
+    work_item.payload = {
+        "run_id": str(run.id),
+        "research_input": {},
+        "follow_up_task_id": str(task.id),
+    }
+    work_item.attempts = 0
+    work_item.max_attempts = 3
+    work_item.available_at = datetime.now(timezone.utc)
+    work_item.lease_owner = None
+    work_item.lease_expires_at = None
+    work_item.heartbeat_at = None
+    work_item.cancel_requested = False
+    work_item.pause_requested = False
+    work_item.finish_requested = False
+    work_item.last_error = None
+    run.status = RunStatus.CREATED
+    result = {
+        "run_id": str(run.id),
+        "task_id": str(task.id),
+        "status": "queued",
+    }
+    _store_idempotency(
+        session,
+        identity=identity,
+        key=idempotency_key,
+        request_hash=request_hash,
+        response_json=result,
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    enqueue_webhook_event(
+        session,
+        tenant_id=identity.tenant_id,
+        run_id=run.id,
+        event_type="report.follow_up_requested",
+        payload=result,
+    )
+
+    try:
+        session.commit()
+    except IntegrityError as error:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Concurrent follow-up request conflict",
+        ) from error
+
+    return result
 
 
 @app.get("/api/v1/runs/{run_id}/progress")

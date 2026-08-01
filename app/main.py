@@ -28,6 +28,7 @@ from app.observability import (
     emit_event,
     observability_context,
 )
+from app.report_dialog import finalize_follow_up_version
 
 
 def update_run_status(
@@ -141,6 +142,7 @@ def main() -> int:
 
     run_id = None
     research_input: dict = {}
+    follow_up_task_id: uuid.UUID | None = None
     final_status: RunStatus | None = None
 
     try:
@@ -184,6 +186,15 @@ def main() -> int:
                             {},
                         )
                     )
+                    raw_follow_up_task_id = (
+                        work_item.payload.get(
+                            "follow_up_task_id"
+                        )
+                    )
+                    if raw_follow_up_task_id:
+                        follow_up_task_id = uuid.UUID(
+                            raw_follow_up_task_id
+                        )
 
             if research_run is None:
                 print(
@@ -245,6 +256,11 @@ def main() -> int:
             result = graph.invoke(
                 initial_state,
                 config=config,
+            )
+
+        if follow_up_task_id is not None:
+            finalize_follow_up_version(
+                follow_up_task_id
             )
 
         final_status = persisted_run_status(run_id)

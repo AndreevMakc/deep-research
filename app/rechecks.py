@@ -17,8 +17,6 @@ from app.db.models import (
     Claim,
     ClaimRecheckRequest,
     ClaimRecheckStatus,
-    ResearchReport,
-    ResearchReportVersion,
     SourceSnapshot,
     Verification,
     VerificationVerdict,
@@ -27,6 +25,7 @@ from app.db.repositories import (
     create_verification,
     get_claim,
     get_research_report,
+    snapshot_research_report_version,
 )
 from app.db.session import SessionFactory
 from app.schemas.source_document import SourceDocument
@@ -90,53 +89,6 @@ def recheck_payload(
         "started_at": timestamp(request.started_at),
         "completed_at": timestamp(request.completed_at),
     }
-
-
-def _snapshot_report_version(
-    *,
-    run_id: uuid.UUID,
-    report: ResearchReport,
-    reason: str,
-    requested_by: str | None,
-    claim_recheck_id: uuid.UUID | None,
-) -> int:
-    with SessionFactory() as session:
-        latest = session.scalar(
-            select(ResearchReportVersion)
-            .where(
-                ResearchReportVersion.run_id == run_id
-            )
-            .order_by(
-                ResearchReportVersion.version_number.desc()
-            )
-            .limit(1)
-        )
-
-        if (
-            latest is not None
-            and latest.json_hash == report.json_hash
-        ):
-            return latest.version_number
-
-        version_number = (
-            latest.version_number + 1
-            if latest is not None
-            else 1
-        )
-        session.add(
-            ResearchReportVersion(
-                run_id=run_id,
-                claim_recheck_id=claim_recheck_id,
-                version_number=version_number,
-                reason=reason,
-                requested_by=requested_by,
-                markdown_hash=report.markdown_hash,
-                json_hash=report.json_hash,
-                result_json=report.result_json,
-            )
-        )
-        session.commit()
-        return version_number
 
 
 def _regenerate_report(run_id: uuid.UUID) -> None:
@@ -384,13 +336,22 @@ def execute_claim_recheck(
         material_changed = False
 
         if evidence_changed and original_report is not None:
-            _snapshot_report_version(
-                run_id=run_id,
-                report=original_report,
-                reason="Исходная версия отчёта",
-                requested_by=None,
-                claim_recheck_id=None,
-            )
+            with SessionFactory() as session:
+                current_report = get_research_report(
+                    session,
+                    run_id,
+                )
+                if current_report is None:
+                    raise RuntimeError(
+                        "Research report disappeared"
+                    )
+                snapshot_research_report_version(
+                    session,
+                    report=current_report,
+                    reason="Исходная версия отчёта",
+                    requested_by=None,
+                )
+                session.commit()
             regenerate_fn(run_id)
 
             with SessionFactory() as session:
@@ -410,14 +371,16 @@ def execute_claim_recheck(
                 )
 
                 if material_changed:
+                    version = snapshot_research_report_version(
+                        session,
+                        report=updated_report,
+                        reason=reason,
+                        requested_by=requested_by,
+                        claim_recheck_id=recheck_id,
+                    )
+                    session.commit()
                     report_version_number = (
-                        _snapshot_report_version(
-                            run_id=run_id,
-                            report=updated_report,
-                            reason=reason,
-                            requested_by=requested_by,
-                            claim_recheck_id=recheck_id,
-                        )
+                        version.version_number
                     )
 
         selected_result = results[claim_id]
